@@ -294,21 +294,40 @@ export function scheduleAppointments(
     });
   }
 
-  // Pre-pass: for each rep, count how many appointments are a same-area + tag match
-  // and reserve that many slots so unmatched appointments can't crowd them out.
-  const tagMatchReserved = new Map<string, number>();
-  const tagMatchTaken    = new Map<string, number>();
+  // Pre-pass: reserve slots by priority tier so lower-priority appointments
+  // cannot crowd out higher-priority ones.
+  //   Tier 2 (tag match)  — same area + matching tag
+  //   Tier 1 (area only)  — same area, no tag match
+  //   Tier 0 (cross-area) — uses whatever slots remain after tier 1 & 2 reservations
+  const tagMatchReserved  = new Map<string, number>();
+  const tagMatchTaken     = new Map<string, number>();
+  const areaOnlyReserved  = new Map<string, number>();
+  const areaOnlyTaken     = new Map<string, number>();
+
   for (const rep of workingReps) {
     const repBaseId = getRepBaseId(rep, bases);
     const repTags   = rep.tags ?? [];
-    const reservable = repTags.length === 0 ? 0 : geocodedAppts.filter((appt) => {
+
+    const tagCount = repTags.length === 0 ? 0 : geocodedAppts.filter((appt) => {
       const apptTags = appt.tags ?? [];
       return apptTags.length > 0
         && apptTags.some((t) => repTags.includes(t))
         && getApptBaseId(appt, bases) === repBaseId;
     }).length;
-    tagMatchReserved.set(rep.id, Math.min(reservable, rep.maxAppointments));
+    const tagReserved = Math.min(tagCount, rep.maxAppointments);
+
+    const areaOnlyCount = geocodedAppts.filter((appt) => {
+      const apptTags = appt.tags ?? [];
+      const isTagMatch = repTags.length > 0 && apptTags.length > 0
+        && apptTags.some((t) => repTags.includes(t));
+      return getApptBaseId(appt, bases) === repBaseId && !isTagMatch;
+    }).length;
+    const areaReserved = Math.min(areaOnlyCount, rep.maxAppointments - tagReserved);
+
+    tagMatchReserved.set(rep.id, tagReserved);
     tagMatchTaken.set(rep.id, 0);
+    areaOnlyReserved.set(rep.id, areaReserved);
+    areaOnlyTaken.set(rep.id, 0);
   }
 
   const sorted = [...geocodedAppts].sort(
@@ -326,7 +345,7 @@ export function scheduleAppointments(
     let anyInWindow    = false;
     let anyUnderLimit  = false;
 
-    const candidates: { rep: Rep; travelSec: number; status: ConflictStatus; isAreaTagMatch: boolean }[] = [];
+    const candidates: { rep: Rep; travelSec: number; status: ConflictStatus; isAreaTagMatch: boolean; isAreaOnly: boolean }[] = [];
 
     for (let i = 0; i < workingReps.length; i++) {
       const rep   = workingReps[i];
@@ -335,19 +354,24 @@ export function scheduleAppointments(
       if (!isInTimeWindow(rep, apptTimeMins, apptEndMins)) continue;
       anyInWindow = true;
 
-      // Is this appointment a same-area + tag match for this rep?
       const repTags        = rep.tags ?? [];
+      const repBaseId      = getRepBaseId(rep, bases);
       const isAreaTagMatch = apptTags.length > 0 && repTags.length > 0
         && apptTags.some((t) => repTags.includes(t))
-        && getRepBaseId(rep, bases) === apptBaseId;
+        && repBaseId === apptBaseId;
+      const isAreaOnly = !isAreaTagMatch && repBaseId === apptBaseId;
 
-      // Non-matching appointments cannot use slots reserved for tag matches.
-      const reserved          = tagMatchReserved.get(rep.id) ?? 0;
-      const taken             = tagMatchTaken.get(rep.id) ?? 0;
-      const reservedRemaining = Math.max(0, reserved - taken);
-      const effectiveMax      = isAreaTagMatch
+      // Effective capacity depends on tier:
+      //   tag match  → can use any slot
+      //   area only  → cannot use tag-reserved slots
+      //   cross-area → cannot use tag-reserved or area-reserved slots
+      const tagRemaining  = Math.max(0, (tagMatchReserved.get(rep.id) ?? 0) - (tagMatchTaken.get(rep.id) ?? 0));
+      const areaRemaining = Math.max(0, (areaOnlyReserved.get(rep.id) ?? 0) - (areaOnlyTaken.get(rep.id) ?? 0));
+      const effectiveMax  = isAreaTagMatch
         ? rep.maxAppointments
-        : rep.maxAppointments - reservedRemaining;
+        : isAreaOnly
+          ? rep.maxAppointments - tagRemaining
+          : rep.maxAppointments - tagRemaining - areaRemaining;
 
       if (state.count >= effectiveMax) continue;
       anyUnderLimit = true;
@@ -362,6 +386,7 @@ export function scheduleAppointments(
         rep,
         travelSec,
         isAreaTagMatch,
+        isAreaOnly,
         status: travelSec > availableSec ? "buffered" : "ok",
       });
     }
@@ -393,9 +418,11 @@ export function scheduleAppointments(
     const best  = candidates[0];
     const state = repState.get(best.rep.id)!;
 
-    // Update reserved-slot tracking if this was a tag match
+    // Update slot tracking for the correct tier
     if (best.isAreaTagMatch) {
       tagMatchTaken.set(best.rep.id, (tagMatchTaken.get(best.rep.id) ?? 0) + 1);
+    } else if (best.isAreaOnly) {
+      areaOnlyTaken.set(best.rep.id, (areaOnlyTaken.get(best.rep.id) ?? 0) + 1);
     }
 
     state.assignments.push({
