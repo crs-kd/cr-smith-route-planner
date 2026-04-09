@@ -140,7 +140,7 @@ function TagsManager({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100 flex-shrink-0">
+      <div className="sticky top-0 z-10 flex items-center gap-2 px-5 py-4 border-b border-gray-100 bg-white">
         <button onClick={onBack} className="p-1.5 rounded-md text-coal/50 hover:text-coal hover:bg-gray-100 transition-colors" aria-label="Back">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </button>
@@ -227,7 +227,7 @@ function BasesManager({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
+      <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-white">
         <div className="flex items-center gap-2">
           <button onClick={onBack} className="p-1.5 rounded-md text-coal/50 hover:text-coal hover:bg-gray-100 transition-colors" aria-label="Back to reps">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -859,7 +859,7 @@ function RepManager({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
+      <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-white">
         <h2 className="text-sm font-semibold text-coal">Manage Reps</h2>
         <div className="flex items-center gap-1">
           <button
