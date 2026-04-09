@@ -630,6 +630,7 @@ function RepManager({
       endLocation: form.endLocation ?? "home",
       endBaseId: form.endBaseId,
       isWorking: form.isWorking ?? true,
+      tags: form.tags ?? [],
     };
     const exists = reps.find((r) => r.id === rep.id);
     onChange(exists ? reps.map((r) => (r.id === rep.id ? rep : r)) : [...reps, rep]);
@@ -1106,23 +1107,25 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
       </div>
 
       {/* Appointments section */}
-      <section aria-labelledby="appts-label">
+      <section aria-labelledby="appts-label" className="rounded-lg border border-blue-200 bg-blue-50 overflow-hidden">
         <button
-          className="w-full flex items-center justify-between mb-3 group"
+          className="w-full flex items-center justify-between px-3.5 py-2.5 border-b border-blue-100 text-left"
           onClick={() => setTableCollapsed((c) => !c)}
           aria-expanded={!tableCollapsed}
         >
-          <h2 id="appts-label" className="text-xs font-semibold text-coal/60 uppercase tracking-widest">
+          <h2 id="appts-label" className="text-xs font-semibold text-blue-800 uppercase tracking-wide">
             Appointments {appts.length > 0 && `(${appts.length})`}
           </h2>
-          <svg className={`w-3.5 h-3.5 text-coal/40 transition-transform ${tableCollapsed ? "" : "rotate-180"}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+          <svg
+            width="12" height="12" viewBox="0 0 16 16" fill="none"
+            className={`text-blue-600 transition-transform duration-200 ${tableCollapsed ? "-rotate-90" : ""}`}
+          >
+            <path d="M3 6l5 5 5-5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </button>
 
         {!tableCollapsed && (
-          <>
+          <div className="px-3.5 py-2.5">
             {appts.length > 0 && (
               <div className="mb-2 overflow-hidden rounded-lg border border-gray-200">
                 <table className="w-full text-sm">
@@ -1201,7 +1204,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
               <input ref={fileRef} type="file" accept=".csv" onChange={handleCSV} className="hidden" aria-hidden="true"/>
             </div>
             <p className="mt-1.5 text-xs text-coal/50">One appointment per line — URN (optional), address, time (HH:MM)</p>
-          </>
+          </div>
         )}
       </section>
 
@@ -1213,7 +1216,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
             phase === "done"   ? "bg-green-50 text-green-800 border border-green-100" :
                                  "bg-snow text-loch border border-loch/10"}`}>
           {isLoading && <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0 mt-0.5"/>}
-          {phase === "done"  && <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>}
+          {phase === "done"  && <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>}
           {phase === "error" && <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>}
           <span>{statusMsg}</span>
         </div>
@@ -1390,20 +1393,27 @@ function RepRouteList({
               {idx + 1}
             </span>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2 mb-1">
+              <div className="flex items-start justify-between gap-2 mb-1">
                 <p className={`text-xs ${STATUS_COLOUR[assignment.status]}`}>
                   ↓ ~{formatDurationSec(assignment.travelSec)} travel
                   {conflict && ` · ${conflict}`}
                 </p>
-                <AssignDropdown apptId={assignment.apptId} currentRepId={rep.id} workingReps={workingReps} onReassign={onReassign}/>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                  <AssignDropdown apptId={assignment.apptId} currentRepId={rep.id} workingReps={workingReps} onReassign={onReassign}/>
+                  {appt.tags?.[0] && (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-coal text-white leading-none">
+                      {APPT_TAG_LABELS[appt.tags[0]]}
+                    </span>
+                  )}
+                </div>
               </div>
               <p className="text-sm font-semibold text-coal">
-                {appt.urn || toDisplayTime(appt.timeHHMM)}
+                {appt.urn || appt.address}
               </p>
+              {appt.urn && <p className="text-xs text-coal/50 mt-0.5">{appt.address}</p>}
               <p className="text-xs text-coal/60 mt-0.5">
                 {toDisplayTime(appt.timeHHMM)} – {minsToDisplay(endTimeMins)}
               </p>
-              <p className="text-xs text-coal/50">{appt.address}</p>
             </div>
           </li>
         );
