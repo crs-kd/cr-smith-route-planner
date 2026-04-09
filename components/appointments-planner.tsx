@@ -839,14 +839,9 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
   function addRow() {
     setAppts((a) => [...a, { id: newId(), urn: "", address: "", timeHHMM: "", tags: [] }]);
   }
-  function updateApptTags(id: string, tag: ApptTag) {
+  function updateApptTag(id: string, tag: ApptTag | "") {
     setAppts((prev) =>
-      prev.map((a) => {
-        if (a.id !== id) return a;
-        const current = a.tags ?? [];
-        const next = current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag];
-        return { ...a, tags: next };
-      })
+      prev.map((a) => a.id !== id ? a : { ...a, tags: tag ? [tag] : [] })
     );
   }
   function updateAppt(id: string, field: "urn" | "address" | "timeHHMM", val: string) {
@@ -1167,24 +1162,16 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                               className="w-full text-sm font-mono text-coal bg-transparent outline-none placeholder-coal/30 focus:bg-white rounded px-0.5 transition-colors" />
                           </td>
                           <td className="px-2 py-1.5">
-                            <div className="flex flex-wrap gap-1">
-                              {APPT_TAGS.map((tag) => {
-                                const active = (appt.tags ?? []).includes(tag);
-                                return (
-                                  <button
-                                    key={tag}
-                                    onClick={() => updateApptTags(appt.id, tag)}
-                                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium leading-none transition-colors ${
-                                      active
-                                        ? "bg-coal text-white"
-                                        : "border border-gray-300 text-coal/40 hover:text-coal/70 hover:border-coal/40"
-                                    }`}
-                                  >
-                                    {APPT_TAG_LABELS[tag]}
-                                  </button>
-                                );
-                              })}
-                            </div>
+                            <select
+                              value={(appt.tags ?? [])[0] ?? ""}
+                              onChange={(e) => updateApptTag(appt.id, e.target.value as ApptTag | "")}
+                              className="text-xs text-coal bg-transparent outline-none cursor-pointer"
+                            >
+                              <option value="">—</option>
+                              {APPT_TAGS.map((tag) => (
+                                <option key={tag} value={tag}>{APPT_TAG_LABELS[tag]}</option>
+                              ))}
+                            </select>
                           </td>
                           <td className="px-1.5 py-1.5">
                             <button onClick={() => removeAppt(appt.id)} className="text-coal/25 hover:text-red-500 transition-colors" aria-label="Remove">

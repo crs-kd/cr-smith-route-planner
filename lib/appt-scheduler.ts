@@ -1,10 +1,9 @@
 // ── Appointment tags ──────────────────────────────────────────────────────────
 
-export const APPT_TAGS = ["door", "single_sit", "8_units", "14_units"] as const;
+export const APPT_TAGS = ["door", "8_units", "14_units"] as const;
 export type ApptTag = typeof APPT_TAGS[number];
 export const APPT_TAG_LABELS: Record<ApptTag, string> = {
   door: "Door",
-  single_sit: "Single Sit",
   "8_units": "8+ Units",
   "14_units": "14+ Units",
 };

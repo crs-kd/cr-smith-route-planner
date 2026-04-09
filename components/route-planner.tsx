@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useState, useRef, useCallback, useEffect } from "react";
 import RouteList from "./route-list";
 import AppointmentsPlanner from "./appointments-planner";
+import { useLocalStorage } from "@/lib/use-local-storage";
 
 // Dynamic import for Leaflet map — no SSR
 const MapView = dynamic(() => import("./map-view"), {
@@ -109,6 +110,35 @@ function haversine(a: { lat: number; lng: number }, b: { lat: number; lng: numbe
 export default function RoutePlanner() {
   const [mode, setMode] = useState<Mode>("appointments");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useLocalStorage("cr-smith-sidebar-width", 560);
+  const [isResizing, setIsResizing] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsDesktop(window.innerWidth >= 1024);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    const onMouseMove = (e: MouseEvent) => {
+      const next = startWidth + (e.clientX - startX);
+      const max = Math.floor(window.innerWidth * 0.75);
+      setSidebarWidth(Math.max(420, Math.min(next, max)));
+    };
+    const onMouseUp = () => {
+      setIsResizing(false);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [sidebarWidth, setSidebarWidth]);
   const [anchor, setAnchor] = useState("");
   const [addressInput, setAddressInput] = useState("");
   const [activeTab, setActiveTab] = useState<"paste" | "csv">("paste");
@@ -443,7 +473,22 @@ export default function RoutePlanner() {
   return (
     <div className="flex flex-col lg:flex-row gap-0 min-h-[calc(100vh-64px)]">
       {/* ── Left panel: form ── */}
-      <aside className={`relative flex-shrink-0 bg-white border-r border-gray-100 overflow-hidden transition-[width] duration-300 w-full ${sidebarOpen ? "lg:w-[560px]" : "lg:w-10"}`}>
+      <aside
+        className={`relative flex-shrink-0 bg-white border-r border-gray-100 overflow-hidden w-full ${!isResizing ? "transition-[width] duration-300" : ""}`}
+        style={isDesktop ? { width: sidebarOpen ? sidebarWidth : 40 } : undefined}
+      >
+        {/* Drag-to-resize handle — desktop only, visible when open */}
+        {isDesktop && sidebarOpen && (
+          <div
+            onMouseDown={handleDragStart}
+            className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize z-30 group hover:bg-loch/20 transition-colors"
+            aria-hidden="true"
+          >
+            <div className="absolute right-0.5 top-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {[0,1,2].map(i => <div key={i} className="w-0.5 h-2 bg-coal/30 rounded-full" />)}
+            </div>
+          </div>
+        )}
 
         {/* Collapse/expand toggle — desktop only */}
         <button
