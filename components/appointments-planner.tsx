@@ -23,6 +23,9 @@ import {
   Rep,
   SalesBase,
   ApptInput,
+  ApptTag,
+  APPT_TAGS,
+  APPT_TAG_LABELS,
   ScheduleResult,
   Assignment,
   ConflictStatus,
@@ -322,6 +325,32 @@ function RepEditForm({
         <input type="checkbox" checked={form.isWorking ?? true} onChange={(e) => setForm((f) => ({ ...f, isWorking: e.target.checked }))} className="accent-loch" />
         <span className="text-xs text-coal/70">Working today</span>
       </label>
+      <div>
+        <p className="text-xs text-coal/50 mb-1">Specialisms</p>
+        <div className="flex flex-wrap gap-1.5">
+          {APPT_TAGS.map((tag) => {
+            const active = (form.tags ?? []).includes(tag);
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => setForm((f) => {
+                  const current = f.tags ?? [];
+                  const next = current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag];
+                  return { ...f, tags: next };
+                })}
+                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                  active
+                    ? "bg-coal text-white"
+                    : "border border-gray-300 text-coal/50 hover:text-coal/80 hover:border-coal/40"
+                }`}
+              >
+                {APPT_TAG_LABELS[tag]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div className="flex gap-2 pt-1">
         <button onClick={onSave} disabled={geocoding} className="flex-1 py-2 bg-loch text-white text-sm font-medium rounded-lg disabled:opacity-50 hover:bg-loch/90 transition-colors">
           {geocoding ? "Geocoding…" : "Save"}
@@ -799,7 +828,17 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
   );
 
   function addRow() {
-    setAppts((a) => [...a, { id: newId(), urn: "", address: "", timeHHMM: "" }]);
+    setAppts((a) => [...a, { id: newId(), urn: "", address: "", timeHHMM: "", tags: [] }]);
+  }
+  function updateApptTags(id: string, tag: ApptTag) {
+    setAppts((prev) =>
+      prev.map((a) => {
+        if (a.id !== id) return a;
+        const current = a.tags ?? [];
+        const next = current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag];
+        return { ...a, tags: next };
+      })
+    );
   }
   function updateAppt(id: string, field: "urn" | "address" | "timeHHMM", val: string) {
     setAppts((prev) =>
@@ -1084,6 +1123,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                       <th className="text-left px-2 py-2 text-xs font-semibold text-coal/50 w-16">URN</th>
                       <th className="text-left px-2 py-2 text-xs font-semibold text-coal/50">Address</th>
                       <th className="text-left px-2 py-2 text-xs font-semibold text-coal/50 w-16">Time</th>
+                      <th className="text-left px-2 py-2 text-xs font-semibold text-coal/50">Tags</th>
                       <th className="w-7" />
                     </tr>
                   </thead>
@@ -1113,6 +1153,26 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                             <input value={toDisplayTime(appt.timeHHMM)} onChange={(e) => updateAppt(appt.id, "timeHHMM", e.target.value)}
                               placeholder="HH:MM" maxLength={5}
                               className="w-full text-sm font-mono text-coal bg-transparent outline-none placeholder-coal/30 focus:bg-white rounded px-0.5 transition-colors" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <div className="flex flex-wrap gap-1">
+                              {APPT_TAGS.map((tag) => {
+                                const active = (appt.tags ?? []).includes(tag);
+                                return (
+                                  <button
+                                    key={tag}
+                                    onClick={() => updateApptTags(appt.id, tag)}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium leading-none transition-colors ${
+                                      active
+                                        ? "bg-coal text-white"
+                                        : "border border-gray-300 text-coal/40 hover:text-coal/70 hover:border-coal/40"
+                                    }`}
+                                  >
+                                    {APPT_TAG_LABELS[tag]}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </td>
                           <td className="px-1.5 py-1.5">
                             <button onClick={() => removeAppt(appt.id)} className="text-coal/25 hover:text-red-500 transition-colors" aria-label="Remove">

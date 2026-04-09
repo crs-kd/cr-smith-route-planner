@@ -1,3 +1,14 @@
+// ── Appointment tags ──────────────────────────────────────────────────────────
+
+export const APPT_TAGS = ["door", "single_sit", "8_units", "14_units"] as const;
+export type ApptTag = typeof APPT_TAGS[number];
+export const APPT_TAG_LABELS: Record<ApptTag, string> = {
+  door: "Door",
+  single_sit: "Single Sit",
+  "8_units": "8+ Units",
+  "14_units": "14+ Units",
+};
+
 // ── Sales bases ───────────────────────────────────────────────────────────────
 
 export interface SalesBase {
@@ -38,6 +49,7 @@ export interface Rep {
   endLocation: "home" | "base";
   endBaseId?: SalesBaseId;
   isWorking: boolean;
+  tags?: ApptTag[];
 }
 
 /** Migrate a rep loaded from localStorage (may have old slot-based shape). */
@@ -56,6 +68,7 @@ export function migrateRep(raw: Record<string, unknown>): Rep {
     endLocation:     raw.endLocation === "base" ? "base" : "home",
     endBaseId:       typeof raw.endBaseId === "string" ? raw.endBaseId as SalesBaseId : undefined,
     isWorking:       raw.isWorking !== false,
+    tags:            Array.isArray(raw.tags) ? (raw.tags as string[]).filter((t): t is ApptTag => APPT_TAGS.includes(t as ApptTag)) : [],
   };
 }
 
@@ -69,6 +82,7 @@ export interface ApptInput {
   /** e.g. "1700" */
   timeHHMM: string;
   geocodeFailed?: boolean;
+  tags?: ApptTag[];
 }
 
 export type ConflictStatus =
@@ -160,6 +174,19 @@ export function getRepBaseId(rep: Rep, bases: SalesBase[]): string {
     return closestId;
   }
   return "unassigned";
+}
+
+/** Find the closest base to a geocoded appointment (mirrors getRepBaseId). */
+export function getApptBaseId(appt: ApptInput, bases: SalesBase[]): string {
+  if (appt.lat == null || appt.lng == null) return "unassigned";
+  let closestId = "unassigned";
+  let closestDist = Infinity;
+  for (const base of bases) {
+    if (base.lat == null || base.lng == null) continue;
+    const d = (appt.lat - base.lat) ** 2 + (appt.lng - base.lng) ** 2;
+    if (d < closestDist) { closestDist = d; closestId = base.id; }
+  }
+  return closestId;
 }
 
 /** Resolve a rep's start coordinates + address. */
@@ -319,7 +346,19 @@ export function scheduleAppointments(
       continue;
     }
 
-    candidates.sort((a, b) => a.travelSec - b.travelSec);
+    const apptBaseId = getApptBaseId(appt, bases);
+    const apptTags   = appt.tags ?? [];
+    candidates.sort((a, b) => {
+      const aArea = getRepBaseId(a.rep, bases) === apptBaseId;
+      const bArea = getRepBaseId(b.rep, bases) === apptBaseId;
+      const aTag  = apptTags.length > 0 && apptTags.some((t) => (a.rep.tags ?? []).includes(t));
+      const bTag  = apptTags.length > 0 && apptTags.some((t) => (b.rep.tags ?? []).includes(t));
+      // Tier 2: same area + tag match; Tier 1: same area; Tier 0: different area
+      const aTier = aArea ? (aTag ? 2 : 1) : 0;
+      const bTier = bArea ? (bTag ? 2 : 1) : 0;
+      if (aTier !== bTier) return bTier - aTier;
+      return a.travelSec - b.travelSec;
+    });
     const best  = candidates[0];
     const state = repState.get(best.rep.id)!;
 

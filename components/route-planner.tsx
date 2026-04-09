@@ -107,7 +107,8 @@ function haversine(a: { lat: number; lng: number }, b: { lat: number; lng: numbe
 }
 
 export default function RoutePlanner() {
-  const [mode, setMode] = useState<Mode>("canvass");
+  const [mode, setMode] = useState<Mode>("appointments");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [anchor, setAnchor] = useState("");
   const [addressInput, setAddressInput] = useState("");
   const [activeTab, setActiveTab] = useState<"paste" | "csv">("paste");
@@ -442,11 +443,28 @@ export default function RoutePlanner() {
   return (
     <div className="flex flex-col lg:flex-row gap-0 min-h-[calc(100vh-64px)]">
       {/* ── Left panel: form ── */}
-      <aside className="w-full lg:w-[420px] xl:w-[460px] flex-shrink-0 bg-white border-r border-gray-100 overflow-y-auto">
+      <aside className={`relative flex-shrink-0 bg-white border-r border-gray-100 overflow-hidden transition-[width] duration-300 w-full ${sidebarOpen ? "lg:w-[560px]" : "lg:w-10"}`}>
+
+        {/* Collapse/expand toggle — desktop only */}
+        <button
+          onClick={() => setSidebarOpen((o) => !o)}
+          className="hidden lg:flex items-center justify-center absolute top-3 right-2 z-20 w-6 h-6 rounded-md text-coal/40 hover:text-coal/80 hover:bg-gray-100 transition-colors"
+          aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            {sidebarOpen
+              ? <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+              : <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+            }
+          </svg>
+        </button>
+
+        {/* Scrollable content — hidden on desktop when collapsed */}
+        <div className={`overflow-y-auto h-full ${!sidebarOpen ? "lg:invisible lg:pointer-events-none" : ""}`}>
 
         {/* ── Mode tabs ─────────────────────────────────────────────────────── */}
         <div className="flex border-b border-gray-100 px-5 lg:px-6" role="tablist" aria-label="Route planner mode">
-          {(["canvass", "appointments"] as const).map((m) => (
+          {(["appointments", "canvass"] as const).map((m) => (
             <button
               key={m}
               role="tab"
@@ -771,6 +789,7 @@ export default function RoutePlanner() {
           )}
         </div>
         </div>{/* end canvass wrapper */}
+        </div>{/* end scrollable content */}
       </aside>
 
       {/* ── Right panel: map ── */}
