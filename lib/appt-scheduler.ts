@@ -67,7 +67,7 @@ export function migrateRep(raw: Record<string, unknown>): Rep {
     endLocation:     raw.endLocation === "base" ? "base" : "home",
     endBaseId:       typeof raw.endBaseId === "string" ? raw.endBaseId as SalesBaseId : undefined,
     isWorking:       raw.isWorking !== false,
-    tags:            Array.isArray(raw.tags) ? (raw.tags as string[]).filter((t): t is ApptTag => APPT_TAGS.includes(t as ApptTag)) : [],
+    tags:            Array.isArray(raw.tags) ? (raw.tags as string[]).filter(t => typeof t === "string") as ApptTag[] : [],
   };
 }
 

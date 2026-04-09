@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
 import {
   DndContext,
   closestCenter,
@@ -58,6 +58,21 @@ interface AppointmentsPlannerProps {
 
 type Phase = "idle" | "geocoding" | "matrix" | "scheduling" | "done" | "error";
 
+interface CustomTag { id: string; label: string; }
+
+const defaultCustomTags: CustomTag[] = [
+  { id: "door", label: "Door" },
+  { id: "8_units", label: "8+ Units" },
+  { id: "14_units", label: "14+ Units" },
+];
+
+const CustomTagsContext = createContext<CustomTag[]>(defaultCustomTags);
+
+function useCustomTags() { return useContext(CustomTagsContext); }
+function getTagLabel(id: string, tags: CustomTag[]): string {
+  return tags.find(t => t.id === id)?.label ?? id;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function newId() { return Math.random().toString(36).slice(2, 9); }
@@ -100,6 +115,71 @@ async function geocodeOne(address: string): Promise<{ lat: number; lng: number }
     if (!results[0]) return null;
     return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) };
   } catch { return null; }
+}
+
+// ── Tags Manager ─────────────────────────────────────────────────────────────
+
+function TagsManager({
+  customTags, onTagsChange, onRemoveTag, onBack,
+}: {
+  customTags: CustomTag[];
+  onTagsChange: (tags: CustomTag[]) => void;
+  onRemoveTag: (tagId: string) => void;
+  onBack: () => void;
+}) {
+  const [newLabel, setNewLabel] = useState("");
+
+  function addTag() {
+    const label = newLabel.trim();
+    if (!label) return;
+    const id = label.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+    if (!id || customTags.some(t => t.id === id)) return;
+    onTagsChange([...customTags, { id, label }]);
+    setNewLabel("");
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100 flex-shrink-0">
+        <button onClick={onBack} className="p-1.5 rounded-md text-coal/50 hover:text-coal hover:bg-gray-100 transition-colors" aria-label="Back">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+        <h2 className="text-sm font-semibold text-coal">Tags</h2>
+      </div>
+      <div className="flex-1 overflow-y-auto p-5 space-y-2">
+        {customTags.map(tag => (
+          <div key={tag.id} className="flex items-center justify-between px-3 py-2 bg-white border border-gray-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-medium px-2 py-1 rounded bg-saltire text-white leading-none">{tag.label}</span>
+              <span className="text-xs text-coal/50 font-mono">{tag.id}</span>
+            </div>
+            <button
+              onClick={() => onRemoveTag(tag.id)}
+              className="p-1.5 text-coal/30 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+              aria-label={`Remove ${tag.label}`}
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2h4v2M5 4v8a1 1 0 001 1h4a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+          </div>
+        ))}
+        <div className="flex gap-2 pt-1">
+          <input
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addTag()}
+            placeholder="New tag label (e.g. 6+ Units)"
+            className="flex-1 px-3 py-2 text-sm bg-snow border border-loch/10 rounded-lg outline-none focus:ring-2 focus:ring-loch/20 focus:border-loch/30 transition-all"
+          />
+          <button
+            onClick={addTag}
+            className="px-3 py-2 bg-loch text-white text-sm font-medium rounded-lg hover:bg-loch/90 transition-colors"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Bases Manager ─────────────────────────────────────────────────────────────
@@ -262,6 +342,7 @@ function RepEditForm({
   bases: SalesBase[];
 }) {
   const inputCls = "w-full px-3 py-2 text-sm bg-snow border border-loch/10 rounded-lg outline-none focus:ring-2 focus:ring-loch/20 focus:border-loch/30 transition-all";
+  const customTags = useCustomTags();
   return (
     <div className="p-3 space-y-2.5 bg-snow/50">
       <input className={inputCls} placeholder="Full name" value={form.name ?? ""} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
@@ -328,24 +409,24 @@ function RepEditForm({
       <div>
         <p className="text-xs text-coal/50 mb-1">Specialisms</p>
         <div className="flex flex-wrap gap-1.5">
-          {APPT_TAGS.map((tag) => {
-            const active = (form.tags ?? []).includes(tag);
+          {customTags.map((ct) => {
+            const active = (form.tags ?? []).includes(ct.id as ApptTag);
             return (
               <button
-                key={tag}
+                key={ct.id}
                 type="button"
                 onClick={() => setForm((f) => {
                   const current = f.tags ?? [];
-                  const next = current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag];
+                  const next = current.includes(ct.id as ApptTag) ? current.filter((t) => t !== ct.id) : [...current, ct.id as ApptTag];
                   return { ...f, tags: next };
                 })}
                 className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
                   active
-                    ? "bg-coal text-white"
+                    ? "bg-saltire text-white"
                     : "border border-gray-300 text-coal/50 hover:text-coal/80 hover:border-coal/40"
                 }`}
               >
-                {APPT_TAG_LABELS[tag]}
+                {ct.label}
               </button>
             );
           })}
@@ -386,6 +467,7 @@ function SortableRepCard({
   onMoveDown: (id: string) => void;
   onUpdateRepTags: (repId: string, tag: ApptTag) => void;
 }) {
+  const customTags = useCustomTags();
   const isEditing = editingId === rep.id;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: rep.id,
@@ -465,17 +547,17 @@ function SortableRepCard({
             <div className="flex gap-1 flex-wrap justify-end">
               {(rep.tags ?? []).map(tag => (
                 <span key={tag} className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded bg-saltire text-white leading-none">
-                  {APPT_TAG_LABELS[tag]}
+                  {getTagLabel(tag, customTags)}
                   <button
                     onClick={() => onUpdateRepTags(rep.id, tag)}
                     className="hover:opacity-70 transition-opacity leading-none"
-                    aria-label={`Remove ${APPT_TAG_LABELS[tag]}`}
+                    aria-label={`Remove ${getTagLabel(tag, customTags)}`}
                   >
                     <svg width="7" height="7" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg>
                   </button>
                 </span>
               ))}
-              {(rep.tags ?? []).length < APPT_TAGS.length && (
+              {(rep.tags ?? []).length < customTags.length && (
                 <span className="relative inline-block">
                   <button className="text-coal/30 hover:text-saltire transition-colors text-base font-light leading-none" aria-label="Add tag">+</button>
                   <select
@@ -485,8 +567,8 @@ function SortableRepCard({
                     aria-label="Select tag"
                   >
                     <option value="" disabled>Select tag</option>
-                    {APPT_TAGS.filter(t => !(rep.tags ?? []).includes(t)).map(tag => (
-                      <option key={tag} value={tag}>{APPT_TAG_LABELS[tag]}</option>
+                    {customTags.filter(ct => !(rep.tags ?? []).includes(ct.id as ApptTag)).map(ct => (
+                      <option key={ct.id} value={ct.id}>{ct.label}</option>
                     ))}
                   </select>
                 </span>
@@ -532,23 +614,30 @@ function SortableGroup({
   const isNewRepInThisGroup = editingId !== null && !groupReps.find(r => r.id === editingId) &&
     form.id === editingId && (form as { _groupId?: string })._groupId === baseId;
 
+  const addFormRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (isNewRepInThisGroup && addFormRef.current) {
+      addFormRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [isNewRepInThisGroup]);
+
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: `group-${baseId}`,
     data: { type: "group" },
   });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
   const arrowCls = "p-1 rounded transition-colors";
-  const arrowActive = "text-coal/40 hover:text-coal hover:bg-gray-200";
+  const arrowActive = "text-blue-600/50 hover:text-blue-700 hover:bg-blue-100";
   const arrowDisabled = "text-coal/15 cursor-not-allowed";
 
   return (
-    <div ref={setNodeRef} style={style} className="rounded-xl border border-gray-200 overflow-hidden">
+    <div ref={setNodeRef} style={style} className="rounded-xl border border-blue-200 overflow-hidden bg-blue-50">
       {/* Group header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200">
+      <div className="flex items-center gap-2 px-3 py-2 bg-blue-100/70 border-b border-blue-200">
         <button {...attributes} {...listeners} className="p-1 text-coal/25 hover:text-coal/50 cursor-grab active:cursor-grabbing touch-none flex-shrink-0" aria-label="Drag group">
           <GripIcon />
         </button>
-        <p className="flex-1 text-xs font-semibold text-coal/60 uppercase tracking-wider">{baseName}</p>
+        <p className="flex-1 text-xs font-semibold text-blue-700/80 uppercase tracking-wider">{baseName}</p>
         <span className="text-xs text-coal/40 mr-1">{groupReps.length} rep{groupReps.length === 1 ? "" : "s"}</span>
         <button
           disabled={isFirst}
@@ -586,14 +675,14 @@ function SortableGroup({
 
         {/* New rep form for this group */}
         {isNewRepInThisGroup && (
-          <div className="border border-loch/20 rounded-lg overflow-hidden">
+          <div ref={addFormRef} className="border border-loch/20 rounded-lg overflow-hidden">
             <RepEditForm form={form} setForm={setForm} onSave={onSave} onCancel={onCancel} geocoding={geocoding} bases={bases} />
           </div>
         )}
 
         <button
           onClick={() => onAddRep(baseId)}
-          className="w-full flex items-center justify-center gap-1.5 py-2 border border-dashed border-loch/20 rounded-lg text-xs text-loch/60 hover:text-loch hover:border-loch/40 transition-colors"
+          className="w-full flex items-center justify-center gap-1.5 py-2 border border-dashed border-blue-300 rounded-lg text-xs text-blue-600/70 hover:text-blue-700 hover:border-blue-400 transition-colors"
         >
           <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
           Add Rep
@@ -606,18 +695,22 @@ function SortableGroup({
 // ── Rep Manager ───────────────────────────────────────────────────────────────
 
 function RepManager({
-  reps, bases, onChange, onBasesChange, onClose,
+  reps, bases, onChange, onBasesChange, onClose, customTags, onTagsChange, onRemoveTag,
 }: {
   reps: Rep[];
   bases: SalesBase[];
   onChange: (reps: Rep[]) => void;
   onBasesChange: (bases: SalesBase[]) => void;
   onClose: () => void;
+  customTags: CustomTag[];
+  onTagsChange: (tags: CustomTag[]) => void;
+  onRemoveTag: (tagId: string) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<Rep>>({});
   const [geocoding, setGeocoding] = useState(false);
-  const [showBases, setShowBases] = useState(false);
+  const [showSettings, setShowSettings] = useState<"bases" | "tags" | null>(null);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   // Group order: array of baseIds (+ "unassigned"). Initialized from bases order.
   const [groupOrder, setGroupOrder] = useState<string[]>(() =>
     [...bases.map(b => b.id), "unassigned"]
@@ -747,27 +840,51 @@ function RepManager({
     }
   }
 
-  if (showBases) {
-    return (
-      <BasesManager bases={bases} onChange={onBasesChange} onBack={() => setShowBases(false)} />
-    );
+  if (showSettings === "bases") {
+    return <BasesManager bases={bases} onChange={onBasesChange} onBack={() => setShowSettings(null)} />;
+  }
+  if (showSettings === "tags") {
+    return <TagsManager customTags={customTags} onTagsChange={onTagsChange} onRemoveTag={onRemoveTag} onBack={() => setShowSettings(null)} />;
   }
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-coal">Manage Reps</h2>
-          <button onClick={() => setShowBases(true)} className="p-1.5 rounded-md text-coal/40 hover:text-coal hover:bg-gray-100 transition-colors" title="Manage sales bases" aria-label="Manage sales bases">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
+        <h2 className="text-sm font-semibold text-coal">Manage Reps</h2>
+        <div className="flex items-center gap-1">
+          <div className="relative">
+            <button
+              onClick={() => setShowSettingsMenu(s => !s)}
+              className="p-1.5 rounded-md text-coal/40 hover:text-coal hover:bg-gray-100 transition-colors"
+              title="Settings"
+              aria-label="Settings"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+            {showSettingsMenu && (
+              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 min-w-[120px]">
+                <button
+                  onClick={() => { setShowSettings("bases"); setShowSettingsMenu(false); }}
+                  className="w-full text-left px-3 py-2 text-sm text-coal hover:bg-gray-50 transition-colors"
+                >
+                  Sales Bases
+                </button>
+                <button
+                  onClick={() => { setShowSettings("tags"); setShowSettingsMenu(false); }}
+                  className="w-full text-left px-3 py-2 text-sm text-coal hover:bg-gray-50 transition-colors"
+                >
+                  Tags
+                </button>
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-md text-coal/50 hover:text-coal hover:bg-gray-100 transition-colors" aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
           </button>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-md text-coal/50 hover:text-coal hover:bg-gray-100 transition-colors" aria-label="Close">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -856,6 +973,17 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
   }
 
   const [bases, setBases] = useLocalStorage<SalesBase[]>("cr-smith-bases", [...SALES_BASES]);
+  const [customTags, setCustomTagsState] = useLocalStorage<CustomTag[]>("cr-smith-tags", defaultCustomTags);
+
+  function setCustomTags(tags: CustomTag[]) {
+    setCustomTagsState(tags);
+  }
+
+  function removeTag(tagId: string) {
+    setCustomTagsState(prev => prev.filter(t => t.id !== tagId));
+    setReps(reps.map(r => ({ ...r, tags: (r.tags ?? []).filter(t => t !== tagId as ApptTag) })));
+    setAppts(prev => prev.map(a => ({ ...a, tags: (a.tags ?? []).filter(t => t !== tagId) })));
+  }
 
   const [appts, setAppts] = useState<ApptInput[]>([]);
   const [durationHours, setDurationHours] = useState(1);
@@ -1111,7 +1239,20 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
   }
 
   if (showRepManager) {
-    return <RepManager reps={reps} bases={bases} onChange={setReps} onBasesChange={setBases} onClose={() => setShowRepManager(false)} />;
+    return (
+      <CustomTagsContext.Provider value={customTags}>
+        <RepManager
+          reps={reps}
+          bases={bases}
+          onChange={setReps}
+          onBasesChange={setBases}
+          onClose={() => setShowRepManager(false)}
+          customTags={customTags}
+          onTagsChange={setCustomTags}
+          onRemoveTag={removeTag}
+        />
+      </CustomTagsContext.Provider>
+    );
   }
 
   // ── Problems to surface inline ─────────────────────────────────────────────
@@ -1120,6 +1261,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
   const showProblems    = geocodeFailList.length > 0 || unassignedList.length > 0;
 
   return (
+  <CustomTagsContext.Provider value={customTags}>
     <div className="p-5 lg:p-6 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-4">
@@ -1209,7 +1351,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                           <td className="px-2 py-1.5 whitespace-nowrap">
                             {(appt.tags ?? [])[0] ? (
                               <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded bg-saltire text-white leading-none">
-                                {APPT_TAG_LABELS[(appt.tags as ApptTag[])[0]]}
+                                {getTagLabel((appt.tags as ApptTag[])[0], customTags)}
                                 <button
                                   onClick={() => updateApptTag(appt.id, "")}
                                   className="hover:opacity-70 transition-opacity leading-none"
@@ -1228,8 +1370,8 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                                   aria-label="Select tag"
                                 >
                                   <option value="" disabled>Select tag</option>
-                                  {APPT_TAGS.map((tag) => (
-                                    <option key={tag} value={tag}>{APPT_TAG_LABELS[tag]}</option>
+                                  {customTags.map((ct) => (
+                                    <option key={ct.id} value={ct.id}>{ct.label}</option>
                                   ))}
                                 </select>
                               </span>
@@ -1395,6 +1537,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
         </div>
       )}
     </div>
+  </CustomTagsContext.Provider>
   );
 }
 
@@ -1411,6 +1554,7 @@ function RepRouteList({
   bases: SalesBase[];
   onReassign: (apptId: string, fromRepId: string | null, toRepId: string | null) => void;
 }) {
+  const customTags = useCustomTags();
   const sortedAssignments = [...schedule.assignments].sort((a, b) => {
     const ta = geocodedAppts.find((ap) => ap.id === a.apptId);
     const tb = geocodedAppts.find((ap) => ap.id === b.apptId);
@@ -1464,7 +1608,7 @@ function RepRouteList({
                 </p>
                 {appt.tags?.[0] && (
                   <span className="text-[10px] font-medium px-2 py-1 rounded bg-saltire text-white leading-none flex-shrink-0">
-                    {APPT_TAG_LABELS[appt.tags[0]]}
+                    {getTagLabel(appt.tags[0], customTags)}
                   </span>
                 )}
               </div>

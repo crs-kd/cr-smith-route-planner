@@ -113,6 +113,7 @@ export default function RoutePlanner() {
   const [sidebarWidth, setSidebarWidth] = useLocalStorage("cr-smith-sidebar-width", 560);
   const [isResizing, setIsResizing] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
+  const [enableTransition, setEnableTransition] = useState(false);
 
   // useLayoutEffect runs before the first browser paint — ensures isDesktop (and thus
   // the inline width:40 style) is applied before anything is shown, so the sidebar
@@ -123,7 +124,10 @@ export default function RoutePlanner() {
     check();
     window.addEventListener("resize", check);
     let raf1: number, raf2: number;
+    // rAF1: enable transitions (sidebar is still collapsed at width:40, no visible animation)
     raf1 = requestAnimationFrame(() => {
+      setEnableTransition(true);
+      // rAF2: now open — transition plays from 40 → saved width
       raf2 = requestAnimationFrame(() => setSidebarOpen(true));
     });
     return () => {
@@ -486,7 +490,7 @@ export default function RoutePlanner() {
     <div className="flex flex-col lg:flex-row gap-0 min-h-[calc(100vh-64px)]">
       {/* ── Left panel: form ── */}
       <aside
-        className={`relative flex-shrink-0 bg-white border-r border-gray-100 overflow-hidden w-full ${!isResizing ? "transition-[width] duration-300" : ""}`}
+        className={`relative flex-shrink-0 bg-white border-r border-gray-100 overflow-hidden w-full ${enableTransition && !isResizing ? "transition-[width] duration-300" : ""}`}
         style={isDesktop ? { width: sidebarOpen ? sidebarWidth : 40 } : undefined}
       >
         {/* Drag-to-resize handle — desktop only, visible when open */}
