@@ -28,7 +28,8 @@ export async function PUT(req: Request) {
     });
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("Failed to save reps:", err);
-    return NextResponse.json({ error: "Failed to save" }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("Failed to save reps:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

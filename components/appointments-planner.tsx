@@ -786,7 +786,7 @@ function RepManager({
 
 export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlannerProps) {
   const [reps, setRepsState] = useState<Rep[]>([]);
-  const [repSaveError, setRepSaveError] = useState(false);
+  const [repSaveError, setRepSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/reps")
@@ -803,8 +803,14 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(resolved),
     })
-      .then((r) => { if (!r.ok) throw new Error("save failed"); setRepSaveError(false); })
-      .catch(() => setRepSaveError(true));
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.error ?? "save failed");
+        }
+        setRepSaveError(null);
+      })
+      .catch((e: Error) => setRepSaveError(e.message));
   }
 
   const [bases, setBases] = useLocalStorage<SalesBase[]>("cr-smith-bases", [...SALES_BASES]);
@@ -1098,7 +1104,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
             </span>
           )}
           {repSaveError && (
-            <span className="ml-0.5 text-red-500" title="Rep changes could not be saved">⚠</span>
+            <span className="ml-0.5 text-red-500" title={`Rep changes could not be saved: ${repSaveError}`}>⚠</span>
           )}
         </button>
       </div>
