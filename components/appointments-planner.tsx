@@ -452,13 +452,24 @@ function SortableRepCard({
               )}
             </div>
           </div>
-          <div className="flex gap-1 flex-shrink-0">
-            <button onClick={() => onStartEdit(rep)} className="p-1.5 text-coal/40 hover:text-loch hover:bg-snow rounded transition-colors" aria-label="Edit">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </button>
-            <button onClick={() => onDelete(rep.id)} className="p-1.5 text-coal/40 hover:text-red-500 hover:bg-red-50 rounded transition-colors" aria-label="Delete">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2h4v2M5 4v8a1 1 0 001 1h4a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </button>
+          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+            <div className="flex gap-1">
+              <button onClick={() => onStartEdit(rep)} className="p-1.5 text-coal/40 hover:text-loch hover:bg-snow rounded transition-colors" aria-label="Edit">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </button>
+              <button onClick={() => onDelete(rep.id)} className="p-1.5 text-coal/40 hover:text-red-500 hover:bg-red-50 rounded transition-colors" aria-label="Delete">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2h4v2M5 4v8a1 1 0 001 1h4a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </button>
+            </div>
+            {(rep.tags ?? []).length > 0 && (
+              <div className="flex gap-0.5 flex-wrap justify-end">
+                {(rep.tags ?? []).map(tag => (
+                  <span key={tag} className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-saltire text-white leading-none">
+                    {APPT_TAG_LABELS[tag]}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1127,14 +1138,14 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
         {!tableCollapsed && (
           <div className="px-3.5 py-2.5">
             {appts.length > 0 && (
-              <div className="mb-2 overflow-hidden rounded-lg border border-gray-200">
+              <div className="mb-2 overflow-hidden rounded-lg border border-white">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-snow border-b border-gray-100">
+                    <tr className="bg-white border-b border-snow">
                       <th className="text-left px-2 py-2 text-xs font-semibold text-coal/50 w-16">URN</th>
                       <th className="text-left px-2 py-2 text-xs font-semibold text-coal/50">Address</th>
                       <th className="text-left px-2 py-2 text-xs font-semibold text-coal/50 w-16">Time</th>
-                      <th className="text-left px-2 py-2 text-xs font-semibold text-coal/50">Tags</th>
+                      <th className="text-left px-2 py-2 text-xs font-semibold text-coal/50">Tag</th>
                       <th className="w-7" />
                     </tr>
                   </thead>
@@ -1142,7 +1153,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                     {appts.map((appt) => {
                       const isFailed = geocodeFailedAddresses.has(appt.address);
                       return (
-                        <tr key={appt.id} className={`border-b border-gray-50 last:border-b-0 ${isFailed ? "bg-amber-50" : ""}`}>
+                        <tr key={appt.id} className={`border-b border-snow last:border-b-0 ${isFailed ? "bg-amber-50" : ""}`}>
                           <td className="px-2 py-1.5">
                             <input value={appt.urn ?? ""} onChange={(e) => updateAppt(appt.id, "urn", e.target.value)}
                               placeholder="URN"
@@ -1165,17 +1176,34 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                               placeholder="HH:MM" maxLength={5}
                               className="w-full text-sm font-mono text-coal bg-transparent outline-none placeholder-coal/30 focus:bg-white rounded px-0.5 transition-colors" />
                           </td>
-                          <td className="px-2 py-1.5">
-                            <select
-                              value={(appt.tags ?? [])[0] ?? ""}
-                              onChange={(e) => updateApptTag(appt.id, e.target.value as ApptTag | "")}
-                              className="text-xs text-coal bg-transparent outline-none cursor-pointer"
-                            >
-                              <option value="">—</option>
-                              {APPT_TAGS.map((tag) => (
-                                <option key={tag} value={tag}>{APPT_TAG_LABELS[tag]}</option>
-                              ))}
-                            </select>
+                          <td className="px-2 py-1.5 whitespace-nowrap">
+                            {(appt.tags ?? [])[0] ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-saltire text-white leading-none">
+                                {APPT_TAG_LABELS[(appt.tags as ApptTag[])[0]]}
+                                <button
+                                  onClick={() => updateApptTag(appt.id, "")}
+                                  className="hover:opacity-70 transition-opacity leading-none"
+                                  aria-label="Remove tag"
+                                >
+                                  <svg width="7" height="7" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg>
+                                </button>
+                              </span>
+                            ) : (
+                              <span className="relative inline-block">
+                                <button className="text-coal/30 hover:text-saltire transition-colors text-base font-light leading-none" aria-label="Add tag">+</button>
+                                <select
+                                  value=""
+                                  onChange={(e) => updateApptTag(appt.id, e.target.value as ApptTag | "")}
+                                  className="absolute inset-0 opacity-0 cursor-pointer w-full"
+                                  aria-label="Select tag"
+                                >
+                                  <option value="" disabled>Select tag</option>
+                                  {APPT_TAGS.map((tag) => (
+                                    <option key={tag} value={tag}>{APPT_TAG_LABELS[tag]}</option>
+                                  ))}
+                                </select>
+                              </span>
+                            )}
                           </td>
                           <td className="px-1.5 py-1.5">
                             <button onClick={() => removeAppt(appt.id)} className="text-coal/25 hover:text-red-500 transition-colors" aria-label="Remove">
@@ -1398,18 +1426,18 @@ function RepRouteList({
                   ↓ ~{formatDurationSec(assignment.travelSec)} travel
                   {conflict && ` · ${conflict}`}
                 </p>
-                <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                  <AssignDropdown apptId={assignment.apptId} currentRepId={rep.id} workingReps={workingReps} onReassign={onReassign}/>
-                  {appt.tags?.[0] && (
-                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-coal text-white leading-none">
-                      {APPT_TAG_LABELS[appt.tags[0]]}
-                    </span>
-                  )}
-                </div>
+                <AssignDropdown apptId={assignment.apptId} currentRepId={rep.id} workingReps={workingReps} onReassign={onReassign}/>
               </div>
-              <p className="text-sm font-semibold text-coal">
-                {appt.urn || appt.address}
-              </p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-semibold text-coal">
+                  {appt.urn || appt.address}
+                </p>
+                {appt.tags?.[0] && (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-saltire text-white leading-none flex-shrink-0">
+                    {APPT_TAG_LABELS[appt.tags[0]]}
+                  </span>
+                )}
+              </div>
               {appt.urn && <p className="text-xs text-coal/50 mt-0.5">{appt.address}</p>}
               <p className="text-xs text-coal/60 mt-0.5">
                 {toDisplayTime(appt.timeHHMM)} – {minsToDisplay(endTimeMins)}
