@@ -487,10 +487,10 @@ export default function RoutePlanner() {
   const isLoading = phase === "geocoding" || phase === "optimising";
 
   return (
-    <div className="flex flex-col lg:flex-row gap-0 min-h-[calc(100vh-64px)]">
+    <div className="flex flex-col lg:flex-row gap-0 h-[calc(100vh-64px)]">
       {/* ── Left panel: form ── */}
       <aside
-        className={`relative flex-shrink-0 bg-white border-r border-gray-100 overflow-hidden w-full flex flex-col ${enableTransition && !isResizing ? "transition-[width] duration-300" : ""}`}
+        className={`relative flex-shrink-0 bg-white border-r border-gray-100 overflow-x-hidden w-full flex flex-col ${enableTransition && !isResizing ? "transition-[width] duration-300" : ""}`}
         style={isDesktop ? { width: sidebarOpen ? sidebarWidth : 40 } : undefined}
       >
         {/* Drag-to-resize handle — desktop only, visible when open */}

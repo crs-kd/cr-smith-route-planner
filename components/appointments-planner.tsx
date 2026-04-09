@@ -737,6 +737,12 @@ function RepManager({
     return editingId !== null && (form as { _groupId?: string })._groupId === "unassigned";
   });
 
+  // When a new rep is being added to "unassigned", float that group to the top
+  const pendingGroupId = editingId !== null ? (form as { _groupId?: string })._groupId : null;
+  const displayGroups = pendingGroupId === "unassigned"
+    ? [...groups.filter(g => g.baseId === "unassigned"), ...groups.filter(g => g.baseId !== "unassigned")]
+    : groups;
+
   function startEdit(rep: Rep) { setForm({ ...rep }); setEditingId(rep.id); }
 
   async function saveRep() {
@@ -864,35 +870,28 @@ function RepManager({
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
             Add Rep
           </button>
-          <div className="relative">
-            <button
-              onClick={() => setShowSettingsMenu(s => !s)}
-              className="p-1.5 rounded-md text-coal/40 hover:text-coal hover:bg-gray-100 transition-colors"
-              title="Settings"
-              aria-label="Settings"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-            {showSettingsMenu && (
-              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 min-w-[120px]">
-                <button
-                  onClick={() => { setShowSettings("bases"); setShowSettingsMenu(false); }}
-                  className="w-full text-left px-3 py-2 text-sm text-coal hover:bg-gray-50 transition-colors"
-                >
-                  Sales Bases
-                </button>
-                <button
-                  onClick={() => { setShowSettings("tags"); setShowSettingsMenu(false); }}
-                  className="w-full text-left px-3 py-2 text-sm text-coal hover:bg-gray-50 transition-colors"
-                >
-                  Tags
-                </button>
-              </div>
-            )}
-          </div>
+          <button
+            onClick={() => setShowSettings("bases")}
+            className="p-1.5 rounded-md text-coal/40 hover:text-coal hover:bg-gray-100 transition-colors"
+            title="Sales Bases"
+            aria-label="Sales Bases"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z"/>
+              <path d="M9 21V12h6v9"/>
+            </svg>
+          </button>
+          <button
+            onClick={() => setShowSettings("tags")}
+            className="p-1.5 rounded-md text-coal/40 hover:text-coal hover:bg-gray-100 transition-colors"
+            title="Tags"
+            aria-label="Tags"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+              <line x1="7" y1="7" x2="7.01" y2="7"/>
+            </svg>
+          </button>
           <button onClick={onClose} className="p-1.5 rounded-md text-coal/50 hover:text-coal hover:bg-gray-100 transition-colors" aria-label="Close">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
           </button>
@@ -905,13 +904,13 @@ function RepManager({
         )}
 
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <SortableContext items={syncedGroupOrder.map(id => `group-${id}`)} strategy={verticalListSortingStrategy}>
-            {groups.map(({ baseId, baseName, groupReps }, groupIdx) => (
+          <SortableContext items={displayGroups.map(g => `group-${g.baseId}`)} strategy={verticalListSortingStrategy}>
+            {displayGroups.map(({ baseId, baseName, groupReps }, groupIdx) => (
               <SortableGroup
                 key={baseId} baseId={baseId} baseName={baseName} groupReps={groupReps}
                 bases={bases} editingId={editingId} form={form} setForm={setForm}
                 geocoding={geocoding}
-                isFirst={groupIdx === 0} isLast={groupIdx === groups.length - 1}
+                isFirst={groupIdx === 0} isLast={groupIdx === displayGroups.length - 1}
                 onToggleWorking={(id) => onChange(reps.map(r => r.id === id ? { ...r, isWorking: !r.isWorking } : r))}
                 onStartEdit={startEdit} onDelete={deleteRep} onSave={saveRep}
                 onCancel={() => { setEditingId(null); setForm({}); }}
@@ -976,7 +975,23 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
       .catch((e: Error) => setRepSaveError(e.message));
   }
 
-  const [bases, setBases] = useLocalStorage<SalesBase[]>("cr-smith-bases", [...SALES_BASES]);
+  const [bases, setBasesState] = useState<SalesBase[]>([...SALES_BASES]);
+
+  useEffect(() => {
+    fetch("/api/bases")
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setBasesState(data as SalesBase[]); })
+      .catch(console.error);
+  }, []);
+
+  function setBases(next: SalesBase[]) {
+    setBasesState(next);
+    fetch("/api/bases", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    }).catch(console.error);
+  }
   const [customTags, setCustomTagsState] = useLocalStorage<CustomTag[]>("cr-smith-tags", defaultCustomTags);
 
   function setCustomTags(tags: CustomTag[]) {
