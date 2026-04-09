@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from "react";
 import RouteList from "./route-list";
 import AppointmentsPlanner from "./appointments-planner";
 import { useLocalStorage } from "@/lib/use-local-storage";
@@ -114,15 +114,22 @@ export default function RoutePlanner() {
   const [isResizing, setIsResizing] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
 
-  useEffect(() => {
+  // useLayoutEffect runs before the first browser paint — ensures isDesktop (and thus
+  // the inline width:40 style) is applied before anything is shown, so the sidebar
+  // genuinely starts collapsed. The double-rAF then lets the browser commit that
+  // collapsed frame before the open transition plays.
+  useLayoutEffect(() => {
     const check = () => setIsDesktop(window.innerWidth >= 1024);
     check();
     window.addEventListener("resize", check);
-    // Start collapsed then animate open to saved width
-    const t = setTimeout(() => setSidebarOpen(true), 50);
+    let raf1: number, raf2: number;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setSidebarOpen(true));
+    });
     return () => {
       window.removeEventListener("resize", check);
-      clearTimeout(t);
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
     };
   }, []);
 

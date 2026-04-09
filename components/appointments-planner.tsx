@@ -1456,18 +1456,18 @@ function RepRouteList({
                   ↓ ~{formatDurationSec(assignment.travelSec)} travel
                   {conflict && ` · ${conflict}`}
                 </p>
-                <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                  <AssignDropdown apptId={assignment.apptId} currentRepId={rep.id} workingReps={workingReps} onReassign={onReassign}/>
-                  {appt.tags?.[0] && (
-                    <span className="text-[10px] font-medium px-2 py-1 rounded bg-saltire text-white leading-none">
-                      {APPT_TAG_LABELS[appt.tags[0]]}
-                    </span>
-                  )}
-                </div>
+                <AssignDropdown apptId={assignment.apptId} currentRepId={rep.id} workingReps={workingReps} onReassign={onReassign}/>
               </div>
-              <p className="text-sm font-semibold text-coal">
-                {appt.urn || appt.address}
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-coal">
+                  {appt.urn || appt.address}
+                </p>
+                {appt.tags?.[0] && (
+                  <span className="text-[10px] font-medium px-2 py-1 rounded bg-saltire text-white leading-none flex-shrink-0">
+                    {APPT_TAG_LABELS[appt.tags[0]]}
+                  </span>
+                )}
+              </div>
               {appt.urn && <p className="text-xs text-coal/50 mt-0.5">{appt.address}</p>}
               <p className="text-xs text-coal/60 mt-0.5">
                 {toDisplayTime(appt.timeHHMM)} – {minsToDisplay(endTimeMins)}
