@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { list, put, del } from "@vercel/blob";
+import { list, put } from "@vercel/blob";
 
 const BLOB_KEY = "cr-smith-reps.json";
 
@@ -20,14 +20,11 @@ export async function GET() {
 export async function PUT(req: Request) {
   try {
     const reps = await req.json();
-    const { blobs } = await list({ prefix: BLOB_KEY });
-    if (blobs.length > 0) {
-      await del(blobs.map((b) => b.url));
-    }
     await put(BLOB_KEY, JSON.stringify(reps), {
       access: "public",
       contentType: "application/json",
       addRandomSuffix: false,
+      allowOverwrite: true,
     });
     return NextResponse.json({ ok: true });
   } catch (err) {
