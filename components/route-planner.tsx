@@ -490,7 +490,7 @@ export default function RoutePlanner() {
     <div className="flex flex-col lg:flex-row gap-0 min-h-[calc(100vh-64px)]">
       {/* ── Left panel: form ── */}
       <aside
-        className={`relative flex-shrink-0 bg-white border-r border-gray-100 overflow-hidden w-full ${enableTransition && !isResizing ? "transition-[width] duration-300" : ""}`}
+        className={`relative flex-shrink-0 bg-white border-r border-gray-100 overflow-hidden w-full flex flex-col ${enableTransition && !isResizing ? "transition-[width] duration-300" : ""}`}
         style={isDesktop ? { width: sidebarOpen ? sidebarWidth : 40 } : undefined}
       >
         {/* Drag-to-resize handle — desktop only, visible when open */}
@@ -520,11 +520,12 @@ export default function RoutePlanner() {
           </svg>
         </button>
 
-        {/* Scrollable content — hidden on desktop when collapsed */}
-        <div className={`overflow-y-auto h-full ${!sidebarOpen ? "lg:invisible lg:pointer-events-none" : ""}`}>
-
-        {/* ── Mode tabs ─────────────────────────────────────────────────────── */}
-        <div className="flex border-b border-gray-100 px-5 lg:px-6" role="tablist" aria-label="Route planner mode">
+        {/* ── Mode tabs — sticky, outside the scroll container ── */}
+        <div
+          className={`flex-shrink-0 flex border-b border-gray-100 bg-white px-5 lg:px-6 ${!sidebarOpen ? "lg:invisible lg:pointer-events-none" : ""}`}
+          role="tablist"
+          aria-label="Route planner mode"
+        >
           {(["appointments", "canvass"] as const).map((m) => (
             <button
               key={m}
@@ -548,6 +549,9 @@ export default function RoutePlanner() {
             </button>
           ))}
         </div>
+
+        {/* Scrollable content */}
+        <div className={`overflow-y-auto flex-1 min-h-0 ${!sidebarOpen ? "lg:invisible lg:pointer-events-none" : ""}`}>
 
         {/* Appointments planner — always mounted to preserve state, hidden when on canvass tab */}
         <div className={mode === "appointments" ? "" : "hidden"}>

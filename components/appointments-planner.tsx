@@ -469,6 +469,12 @@ function SortableRepCard({
 }) {
   const customTags = useCustomTags();
   const isEditing = editingId === rep.id;
+  const editFormRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (isEditing && editFormRef.current) {
+      editFormRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [isEditing]);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: rep.id,
     disabled: isEditing,
@@ -480,9 +486,11 @@ function SortableRepCard({
   const arrowDisabled = "text-coal/15 cursor-not-allowed";
 
   return (
-    <div ref={setNodeRef} style={style} className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+    <div ref={setNodeRef} style={style} className="border border-blue-200 rounded-lg overflow-hidden bg-blue-50">
       {isEditing ? (
+        <div ref={editFormRef} className="bg-white">
         <RepEditForm form={form} setForm={setForm} onSave={onSave} onCancel={onCancel} geocoding={geocoding} bases={bases} />
+        </div>
       ) : (
         <div className="flex items-start gap-2 p-3">
           {/* Grip + arrows stacked */}
@@ -586,7 +594,7 @@ function SortableRepCard({
 function SortableGroup({
   baseId, baseName, groupReps, bases, editingId, form, setForm, geocoding,
   isFirst, isLast,
-  onToggleWorking, onStartEdit, onDelete, onSave, onCancel, onAddRep,
+  onToggleWorking, onStartEdit, onDelete, onSave, onCancel,
   onMoveGroupUp, onMoveGroupDown, onMoveRepUp, onMoveRepDown, onUpdateRepTags,
 }: {
   baseId: string;
@@ -604,7 +612,6 @@ function SortableGroup({
   onDelete: (id: string) => void;
   onSave: () => void;
   onCancel: () => void;
-  onAddRep: (baseId: string) => void;
   onMoveGroupUp: (baseId: string) => void;
   onMoveGroupDown: (baseId: string) => void;
   onMoveRepUp: (repId: string) => void;
@@ -627,17 +634,17 @@ function SortableGroup({
   });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
   const arrowCls = "p-1 rounded transition-colors";
-  const arrowActive = "text-blue-600/50 hover:text-blue-700 hover:bg-blue-100";
+  const arrowActive = "text-coal/40 hover:text-coal hover:bg-gray-200";
   const arrowDisabled = "text-coal/15 cursor-not-allowed";
 
   return (
-    <div ref={setNodeRef} style={style} className="rounded-xl border border-blue-200 overflow-hidden bg-blue-50">
+    <div ref={setNodeRef} style={style} className="rounded-xl border border-gray-200 overflow-hidden">
       {/* Group header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-blue-100/70 border-b border-blue-200">
+      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200">
         <button {...attributes} {...listeners} className="p-1 text-coal/25 hover:text-coal/50 cursor-grab active:cursor-grabbing touch-none flex-shrink-0" aria-label="Drag group">
           <GripIcon />
         </button>
-        <p className="flex-1 text-xs font-semibold text-blue-700/80 uppercase tracking-wider">{baseName}</p>
+        <p className="flex-1 text-xs font-semibold text-coal/60 uppercase tracking-wider">{baseName}</p>
         <span className="text-xs text-coal/40 mr-1">{groupReps.length} rep{groupReps.length === 1 ? "" : "s"}</span>
         <button
           disabled={isFirst}
@@ -675,18 +682,10 @@ function SortableGroup({
 
         {/* New rep form for this group */}
         {isNewRepInThisGroup && (
-          <div ref={addFormRef} className="border border-loch/20 rounded-lg overflow-hidden">
+          <div ref={addFormRef} className="border border-loch/20 rounded-lg overflow-hidden bg-white">
             <RepEditForm form={form} setForm={setForm} onSave={onSave} onCancel={onCancel} geocoding={geocoding} bases={bases} />
           </div>
         )}
-
-        <button
-          onClick={() => onAddRep(baseId)}
-          className="w-full flex items-center justify-center gap-1.5 py-2 border border-dashed border-blue-300 rounded-lg text-xs text-blue-600/70 hover:text-blue-700 hover:border-blue-400 transition-colors"
-        >
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-          Add Rep
-        </button>
       </div>
     </div>
   );
@@ -731,7 +730,12 @@ function RepManager({
     const baseName = baseId === "unassigned" ? "Unassigned" : (base?.name ?? baseId);
     const groupReps = reps.filter(r => getRepBaseId(r, bases) === baseId);
     return { baseId, baseName, groupReps };
-  }).filter(g => g.groupReps.length > 0 || g.baseId !== "unassigned");
+  }).filter(g => {
+    if (g.groupReps.length > 0) return true;
+    if (g.baseId !== "unassigned") return true; // always show named bases
+    // show unassigned group if a new rep is being added there
+    return editingId !== null && (form as { _groupId?: string })._groupId === "unassigned";
+  });
 
   function startEdit(rep: Rep) { setForm({ ...rep }); setEditingId(rep.id); }
 
@@ -852,6 +856,14 @@ function RepManager({
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
         <h2 className="text-sm font-semibold text-coal">Manage Reps</h2>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => addRepToGroup("unassigned")}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-loch/70 hover:text-loch hover:bg-gray-100 transition-colors"
+            aria-label="Add rep"
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            Add Rep
+          </button>
           <div className="relative">
             <button
               onClick={() => setShowSettingsMenu(s => !s)}
@@ -903,7 +915,6 @@ function RepManager({
                 onToggleWorking={(id) => onChange(reps.map(r => r.id === id ? { ...r, isWorking: !r.isWorking } : r))}
                 onStartEdit={startEdit} onDelete={deleteRep} onSave={saveRep}
                 onCancel={() => { setEditingId(null); setForm({}); }}
-                onAddRep={addRepToGroup}
                 onMoveGroupUp={moveGroupUp} onMoveGroupDown={moveGroupDown}
                 onMoveRepUp={moveRepUp} onMoveRepDown={moveRepDown}
                 onUpdateRepTags={(repId, tag) => onChange(reps.map(r => {
@@ -929,13 +940,6 @@ function RepManager({
           </DragOverlay>
         </DndContext>
 
-        {/* Add Rep button for ungrouped / fallback */}
-        {reps.length === 0 && editingId === null && (
-          <button onClick={() => addRepToGroup("unassigned")} className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-loch/20 rounded-lg text-sm text-loch/70 hover:text-loch hover:border-loch/40 transition-colors">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-            Add Rep
-          </button>
-        )}
       </div>
     </div>
   );
