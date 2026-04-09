@@ -295,6 +295,23 @@ export function scheduleAppointments(
     });
   }
 
+  // Pre-pass: for each rep, count how many appointments are a same-area + tag match
+  // and reserve that many slots so unmatched appointments can't crowd them out.
+  const tagMatchReserved = new Map<string, number>();
+  const tagMatchTaken    = new Map<string, number>();
+  for (const rep of workingReps) {
+    const repBaseId = getRepBaseId(rep, bases);
+    const repTags   = rep.tags ?? [];
+    const reservable = repTags.length === 0 ? 0 : geocodedAppts.filter((appt) => {
+      const apptTags = appt.tags ?? [];
+      return apptTags.length > 0
+        && apptTags.some((t) => repTags.includes(t))
+        && getApptBaseId(appt, bases) === repBaseId;
+    }).length;
+    tagMatchReserved.set(rep.id, Math.min(reservable, rep.maxAppointments));
+    tagMatchTaken.set(rep.id, 0);
+  }
+
   const sorted = [...geocodedAppts].sort(
     (a, b) => parseHHMM(a.timeHHMM) - parseHHMM(b.timeHHMM)
   );
@@ -304,11 +321,13 @@ export function scheduleAppointments(
     const apptTimeMins = parseHHMM(appt.timeHHMM);
     const apptEndMins  = apptTimeMins + durationMins;
     const apptLocIdx   = locMatrix.apptIndices[geocodedAppts.findIndex((a) => a.id === appt.id)];
+    const apptBaseId   = getApptBaseId(appt, bases);
+    const apptTags     = appt.tags ?? [];
 
     let anyInWindow    = false;
     let anyUnderLimit  = false;
 
-    const candidates: { rep: Rep; travelSec: number; status: ConflictStatus }[] = [];
+    const candidates: { rep: Rep; travelSec: number; status: ConflictStatus; isAreaTagMatch: boolean }[] = [];
 
     for (let i = 0; i < workingReps.length; i++) {
       const rep   = workingReps[i];
@@ -317,7 +336,21 @@ export function scheduleAppointments(
       if (!isInTimeWindow(rep, apptTimeMins, apptEndMins)) continue;
       anyInWindow = true;
 
-      if (state.count >= rep.maxAppointments) continue;
+      // Is this appointment a same-area + tag match for this rep?
+      const repTags        = rep.tags ?? [];
+      const isAreaTagMatch = apptTags.length > 0 && repTags.length > 0
+        && apptTags.some((t) => repTags.includes(t))
+        && getRepBaseId(rep, bases) === apptBaseId;
+
+      // Non-matching appointments cannot use slots reserved for tag matches.
+      const reserved          = tagMatchReserved.get(rep.id) ?? 0;
+      const taken             = tagMatchTaken.get(rep.id) ?? 0;
+      const reservedRemaining = Math.max(0, reserved - taken);
+      const effectiveMax      = isAreaTagMatch
+        ? rep.maxAppointments
+        : rep.maxAppointments - reservedRemaining;
+
+      if (state.count >= effectiveMax) continue;
       anyUnderLimit = true;
 
       const travelSec    = travelMatrix[state.lastLocIdx]?.[apptLocIdx] ?? null;
@@ -329,6 +362,7 @@ export function scheduleAppointments(
       candidates.push({
         rep,
         travelSec,
+        isAreaTagMatch,
         status: travelSec > availableSec ? "buffered" : "ok",
       });
     }
@@ -346,8 +380,6 @@ export function scheduleAppointments(
       continue;
     }
 
-    const apptBaseId = getApptBaseId(appt, bases);
-    const apptTags   = appt.tags ?? [];
     candidates.sort((a, b) => {
       const aArea = getRepBaseId(a.rep, bases) === apptBaseId;
       const bArea = getRepBaseId(b.rep, bases) === apptBaseId;
@@ -361,6 +393,11 @@ export function scheduleAppointments(
     });
     const best  = candidates[0];
     const state = repState.get(best.rep.id)!;
+
+    // Update reserved-slot tracking if this was a tag match
+    if (best.isAreaTagMatch) {
+      tagMatchTaken.set(best.rep.id, (tagMatchTaken.get(best.rep.id) ?? 0) + 1);
+    }
 
     state.assignments.push({
       apptId: appt.id,
