@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   DndContext,
   closestCenter,
@@ -756,11 +756,23 @@ function RepManager({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlannerProps) {
-  const [rawReps, setRawReps] = useLocalStorage<Record<string, unknown>[]>("cr-smith-reps", []);
-  const reps: Rep[] = rawReps.map(migrateRep);
+  const [reps, setRepsState] = useState<Rep[]>([]);
+
+  useEffect(() => {
+    fetch("/api/reps")
+      .then((r) => r.json())
+      .then((data: Record<string, unknown>[]) => setRepsState(data.map(migrateRep)))
+      .catch(console.error);
+  }, []);
+
   function setReps(next: Rep[] | ((prev: Rep[]) => Rep[])) {
     const resolved = typeof next === "function" ? next(reps) : next;
-    setRawReps(resolved as unknown as Record<string, unknown>[]);
+    setRepsState(resolved);
+    fetch("/api/reps", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(resolved),
+    }).catch(console.error);
   }
 
   const [bases, setBases] = useLocalStorage<SalesBase[]>("cr-smith-bases", [...SALES_BASES]);
