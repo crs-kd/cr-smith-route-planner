@@ -367,7 +367,7 @@ function RepEditForm({
 
 function SortableRepCard({
   rep, bases, editingId, form, setForm, geocoding, isFirst, isLast,
-  onToggleWorking, onStartEdit, onDelete, onSave, onCancel, onMoveUp, onMoveDown,
+  onToggleWorking, onStartEdit, onDelete, onSave, onCancel, onMoveUp, onMoveDown, onUpdateRepTags,
 }: {
   rep: Rep;
   bases: SalesBase[];
@@ -384,6 +384,7 @@ function SortableRepCard({
   onCancel: () => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
+  onUpdateRepTags: (repId: string, tag: ApptTag) => void;
 }) {
   const isEditing = editingId === rep.id;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -452,7 +453,7 @@ function SortableRepCard({
               )}
             </div>
           </div>
-          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
             <div className="flex gap-1">
               <button onClick={() => onStartEdit(rep)} className="p-1.5 text-coal/40 hover:text-loch hover:bg-snow rounded transition-colors" aria-label="Edit">
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -461,15 +462,36 @@ function SortableRepCard({
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2h4v2M5 4v8a1 1 0 001 1h4a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
               </button>
             </div>
-            {(rep.tags ?? []).length > 0 && (
-              <div className="flex gap-0.5 flex-wrap justify-end">
-                {(rep.tags ?? []).map(tag => (
-                  <span key={tag} className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-saltire text-white leading-none">
-                    {APPT_TAG_LABELS[tag]}
-                  </span>
-                ))}
-              </div>
-            )}
+            <div className="flex gap-1 flex-wrap justify-end">
+              {(rep.tags ?? []).map(tag => (
+                <span key={tag} className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded bg-saltire text-white leading-none">
+                  {APPT_TAG_LABELS[tag]}
+                  <button
+                    onClick={() => onUpdateRepTags(rep.id, tag)}
+                    className="hover:opacity-70 transition-opacity leading-none"
+                    aria-label={`Remove ${APPT_TAG_LABELS[tag]}`}
+                  >
+                    <svg width="7" height="7" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg>
+                  </button>
+                </span>
+              ))}
+              {(rep.tags ?? []).length < APPT_TAGS.length && (
+                <span className="relative inline-block">
+                  <button className="text-coal/30 hover:text-saltire transition-colors text-base font-light leading-none" aria-label="Add tag">+</button>
+                  <select
+                    value=""
+                    onChange={(e) => onUpdateRepTags(rep.id, e.target.value as ApptTag)}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full"
+                    aria-label="Select tag"
+                  >
+                    <option value="" disabled>Select tag</option>
+                    {APPT_TAGS.filter(t => !(rep.tags ?? []).includes(t)).map(tag => (
+                      <option key={tag} value={tag}>{APPT_TAG_LABELS[tag]}</option>
+                    ))}
+                  </select>
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -483,7 +505,7 @@ function SortableGroup({
   baseId, baseName, groupReps, bases, editingId, form, setForm, geocoding,
   isFirst, isLast,
   onToggleWorking, onStartEdit, onDelete, onSave, onCancel, onAddRep,
-  onMoveGroupUp, onMoveGroupDown, onMoveRepUp, onMoveRepDown,
+  onMoveGroupUp, onMoveGroupDown, onMoveRepUp, onMoveRepDown, onUpdateRepTags,
 }: {
   baseId: string;
   baseName: string;
@@ -505,6 +527,7 @@ function SortableGroup({
   onMoveGroupDown: (baseId: string) => void;
   onMoveRepUp: (repId: string) => void;
   onMoveRepDown: (repId: string) => void;
+  onUpdateRepTags: (repId: string, tag: ApptTag) => void;
 }) {
   const isNewRepInThisGroup = editingId !== null && !groupReps.find(r => r.id === editingId) &&
     form.id === editingId && (form as { _groupId?: string })._groupId === baseId;
@@ -556,6 +579,7 @@ function SortableGroup({
               onToggleWorking={onToggleWorking} onStartEdit={onStartEdit}
               onDelete={onDelete} onSave={onSave} onCancel={onCancel}
               onMoveUp={onMoveRepUp} onMoveDown={onMoveRepDown}
+              onUpdateRepTags={onUpdateRepTags}
             />
           ))}
         </SortableContext>
@@ -765,6 +789,12 @@ function RepManager({
                 onAddRep={addRepToGroup}
                 onMoveGroupUp={moveGroupUp} onMoveGroupDown={moveGroupDown}
                 onMoveRepUp={moveRepUp} onMoveRepDown={moveRepDown}
+                onUpdateRepTags={(repId, tag) => onChange(reps.map(r => {
+                  if (r.id !== repId) return r;
+                  const current = r.tags ?? [];
+                  const next = current.includes(tag) ? current.filter(t => t !== tag) : [...current, tag];
+                  return { ...r, tags: next };
+                }))}
               />
             ))}
           </SortableContext>
@@ -1178,7 +1208,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                           </td>
                           <td className="px-2 py-1.5 whitespace-nowrap">
                             {(appt.tags ?? [])[0] ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-saltire text-white leading-none">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded bg-saltire text-white leading-none">
                                 {APPT_TAG_LABELS[(appt.tags as ApptTag[])[0]]}
                                 <button
                                   onClick={() => updateApptTag(appt.id, "")}
@@ -1426,18 +1456,18 @@ function RepRouteList({
                   ↓ ~{formatDurationSec(assignment.travelSec)} travel
                   {conflict && ` · ${conflict}`}
                 </p>
-                <AssignDropdown apptId={assignment.apptId} currentRepId={rep.id} workingReps={workingReps} onReassign={onReassign}/>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                  <AssignDropdown apptId={assignment.apptId} currentRepId={rep.id} workingReps={workingReps} onReassign={onReassign}/>
+                  {appt.tags?.[0] && (
+                    <span className="text-[10px] font-medium px-2 py-1 rounded bg-saltire text-white leading-none">
+                      {APPT_TAG_LABELS[appt.tags[0]]}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-1.5">
-                <p className="text-sm font-semibold text-coal">
-                  {appt.urn || appt.address}
-                </p>
-                {appt.tags?.[0] && (
-                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-saltire text-white leading-none flex-shrink-0">
-                    {APPT_TAG_LABELS[appt.tags[0]]}
-                  </span>
-                )}
-              </div>
+              <p className="text-sm font-semibold text-coal">
+                {appt.urn || appt.address}
+              </p>
               {appt.urn && <p className="text-xs text-coal/50 mt-0.5">{appt.address}</p>}
               <p className="text-xs text-coal/60 mt-0.5">
                 {toDisplayTime(appt.timeHHMM)} – {minsToDisplay(endTimeMins)}

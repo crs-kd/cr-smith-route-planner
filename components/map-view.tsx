@@ -355,7 +355,15 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
       }
     });
 
+    // Invalidate Leaflet's cached size whenever the container is resized
+    // (e.g. sidebar collapse/expand, drag-resize)
+    const resizeObserver = new ResizeObserver(() => {
+      mapRef.current?.invalidateSize();
+    });
+    resizeObserver.observe(containerRef.current!);
+
     return () => {
+      resizeObserver.disconnect();
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;

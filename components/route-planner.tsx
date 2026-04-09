@@ -109,7 +109,7 @@ function haversine(a: { lat: number; lng: number }, b: { lat: number; lng: numbe
 
 export default function RoutePlanner() {
   const [mode, setMode] = useState<Mode>("appointments");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useLocalStorage("cr-smith-sidebar-width", 560);
   const [isResizing, setIsResizing] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
@@ -118,7 +118,12 @@ export default function RoutePlanner() {
     const check = () => setIsDesktop(window.innerWidth >= 1024);
     check();
     window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
+    // Start collapsed then animate open to saved width
+    const t = setTimeout(() => setSidebarOpen(true), 50);
+    return () => {
+      window.removeEventListener("resize", check);
+      clearTimeout(t);
+    };
   }, []);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
