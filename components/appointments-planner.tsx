@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
+import { createPortal } from "react-dom";
 import {
   DndContext,
   closestCenter,
@@ -1383,7 +1384,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
 
   return (
   <CustomTagsContext.Provider value={customTags}>
-    <style>{`@media print { body > * { display: none !important; } #__next > * { display: none !important; } .print\\:block { display: block !important; } }`}</style>
+    <style>{`@media print { body > *:not(#print-portal) { display: none !important; } #print-portal { display: block !important; } }`}</style>
     <div className="p-5 lg:p-6 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-4">
@@ -1664,7 +1665,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
               data-rep-id={schedule.repId}
               className={`border rounded-lg overflow-hidden transition-all ${hasConflict ? "border-rose-200" : "border-gray-200"} ${flashRepId === schedule.repId ? "ring-2 ring-loch ring-offset-1" : ""}`}>
               <div className={`flex items-center gap-3 px-4 py-3 ${isExpanded ? "bg-snow" : ""}`}>
-                {/* Export toggle */}
+                {/* Export toggle — tag icon, saltire = included */}
                 <button
                   onClick={() => setExportedRepIds(prev => {
                     const next = new Set(prev);
@@ -1672,10 +1673,14 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                     return next;
                   })}
                   title={isExported ? "Exclude from export" : "Include in export"}
-                  className={`flex-shrink-0 w-4 h-4 rounded border transition-colors ${isExported ? "bg-loch border-loch" : "border-gray-300 bg-white hover:border-loch/50"}`}
+                  className="flex-shrink-0 p-0.5 rounded transition-colors hover:bg-gray-100"
                   aria-label={isExported ? "Exclude from export" : "Include in export"}
                 >
-                  {isExported && <svg viewBox="0 0 16 16" fill="none" className="w-full h-full text-white"><path d="M3 8l3.5 3.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className={isExported ? "text-saltire" : "text-coal/20"}>
+                    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                    <line x1="7" y1="7" x2="7.01" y2="7"/>
+                  </svg>
                 </button>
                 <button onClick={() => handleToggleRep(schedule.repId)}
                   className={`flex-1 flex items-center gap-3 text-left transition-colors ${!isExpanded ? "hover:opacity-80" : ""}`}>
@@ -1712,6 +1717,8 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
           );
         };
 
+        const allExported = sorted.every(s => exportedRepIds.has(s.repId));
+
         return (
           <div className="space-y-2 pt-1 animate-fadeIn">
             {/* Heading row with sort controls and export */}
@@ -1719,18 +1726,31 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
               <h3 className="text-xs font-semibold text-coal/60 uppercase tracking-widest flex-shrink-0">Scheduled Routes</h3>
               <div className="flex-1" />
               {/* Sort segmented control */}
-              <div className="flex rounded-md border border-gray-200 overflow-hidden text-[11px] font-medium">
+              <div className="flex rounded-md border border-gray-200 overflow-hidden text-[11px]">
                 {(["name", "appointments", "travel"] as const).map(opt => (
                   <button key={opt} onClick={() => setSortBy(opt)}
-                    className={`px-2 py-1 transition-colors ${sortBy === opt ? "bg-loch text-white" : "text-coal/50 hover:text-coal hover:bg-gray-50"}`}>
+                    className={`px-2 py-1 transition-colors border-r border-gray-200 last:border-r-0 ${sortBy === opt ? "text-saltire font-bold" : "text-coal/50 font-medium hover:text-coal hover:bg-gray-50"}`}>
                     {opt === "name" ? "A–Z" : opt === "appointments" ? "Appts" : "Travel"}
                   </button>
                 ))}
               </div>
               {/* Group by area toggle */}
               <button onClick={() => setGroupByArea(g => !g)}
-                className={`text-[11px] font-medium px-2 py-1 rounded-md border transition-colors ${groupByArea ? "bg-loch text-white border-loch" : "text-coal/50 border-gray-200 hover:text-coal hover:bg-gray-50"}`}>
+                className={`text-[11px] px-2 py-1 rounded-md border transition-colors ${groupByArea ? "text-saltire font-bold border-saltire/30" : "text-coal/50 font-medium border-gray-200 hover:text-coal hover:bg-gray-50"}`}>
                 Area
+              </button>
+              {/* Select / deselect all */}
+              <button
+                onClick={() => setExportedRepIds(allExported ? new Set() : new Set(sorted.map(s => s.repId)))}
+                title={allExported ? "Deselect all" : "Select all"}
+                className="p-1 rounded transition-colors hover:bg-gray-50"
+                aria-label={allExported ? "Deselect all from export" : "Select all for export"}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  className={allExported ? "text-saltire" : "text-coal/30"}>
+                  <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                  <line x1="7" y1="7" x2="7.01" y2="7"/>
+                </svg>
               </button>
               {/* Export */}
               <button onClick={() => window.print()}
@@ -1747,64 +1767,69 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
               </div>
             ))}
 
-            {/* Print-only output — hidden on screen, shown when window.print() fires */}
-            <div className="hidden print:block">
-              {scheduleResult.schedules
-                .filter(s => exportedRepIds.has(s.repId))
-                .map(schedule => {
-                  const rep = reps.find(r => r.id === schedule.repId);
-                  if (!rep) return null;
-                  const sortedA = [...schedule.assignments].sort((a, b) => {
-                    const ta = geocodedAppts.find(ap => ap.id === a.apptId);
-                    const tb = geocodedAppts.find(ap => ap.id === b.apptId);
-                    return (ta ? parseHHMM(ta.timeHHMM) : 0) - (tb ? parseHHMM(tb.timeHHMM) : 0);
-                  });
-                  return (
-                    <div key={schedule.repId} style={{ pageBreakAfter: "always" }} className="p-8 font-sans">
-                      <h1 className="text-2xl font-bold mb-1">{rep.name}</h1>
-                      <p className="text-sm text-gray-500 mb-6">{new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
-                      <table className="w-full text-sm border-collapse">
-                        <thead>
-                          <tr className="border-b-2 border-gray-300">
-                            <th className="text-left py-2 pr-4">#</th>
-                            <th className="text-left py-2 pr-4">Time</th>
-                            <th className="text-left py-2 pr-4">URN</th>
-                            <th className="text-left py-2 pr-4">Address</th>
-                            <th className="text-left py-2">Travel</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr className="border-b border-gray-100">
-                            <td className="py-2 pr-4 text-gray-400">S</td>
-                            <td className="py-2 pr-4">{schedule.leaveTimeMins != null ? minsToDisplay(schedule.leaveTimeMins) : "—"}</td>
-                            <td className="py-2 pr-4 text-gray-400" colSpan={2}>Start — {schedule.startAddress}</td>
-                            <td className="py-2" />
-                          </tr>
-                          {sortedA.map((a, idx) => {
-                            const appt = geocodedAppts.find(ap => ap.id === a.apptId);
-                            if (!appt) return null;
-                            return (
-                              <tr key={a.apptId} className="border-b border-gray-100">
-                                <td className="py-2 pr-4">{idx + 1}</td>
-                                <td className="py-2 pr-4 font-mono">{toDisplayTime(appt.timeHHMM)}</td>
-                                <td className="py-2 pr-4 font-mono">{appt.urn ?? "—"}</td>
-                                <td className="py-2 pr-4">{appt.address}</td>
-                                <td className="py-2 text-gray-500">{formatDurationSec(a.travelSec)}</td>
-                              </tr>
-                            );
-                          })}
-                          <tr>
-                            <td className="py-2 pr-4 text-gray-400">E</td>
-                            <td className="py-2 pr-4">{schedule.estimatedReturnTimeMins != null ? minsToDisplay(schedule.estimatedReturnTimeMins) : "—"}</td>
-                            <td className="py-2 pr-4 text-gray-400" colSpan={2}>End — {schedule.endAddress}</td>
-                            <td className="py-2" />
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  );
-                })}
-            </div>
+            {/* Print portal — rendered on document.body to escape the app layout */}
+            {typeof document !== "undefined" && createPortal(
+              <div id="print-portal" style={{ display: "none" }}>
+                {scheduleResult.schedules
+                  .filter(s => exportedRepIds.has(s.repId))
+                  .map(schedule => {
+                    const rep = reps.find(r => r.id === schedule.repId);
+                    if (!rep) return null;
+                    const sortedA = [...schedule.assignments].sort((a, b) => {
+                      const ta = geocodedAppts.find(ap => ap.id === a.apptId);
+                      const tb = geocodedAppts.find(ap => ap.id === b.apptId);
+                      return (ta ? parseHHMM(ta.timeHHMM) : 0) - (tb ? parseHHMM(tb.timeHHMM) : 0);
+                    });
+                    return (
+                      <div key={schedule.repId} style={{ pageBreakAfter: "always", padding: "2rem", fontFamily: "sans-serif" }}>
+                        <h1 style={{ fontSize: "1.5rem", fontWeight: "bold", marginBottom: "0.25rem" }}>{rep.name}</h1>
+                        <p style={{ fontSize: "0.875rem", color: "#6b7280", marginBottom: "1.5rem" }}>
+                          {new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+                        </p>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
+                          <thead>
+                            <tr style={{ borderBottom: "2px solid #d1d5db" }}>
+                              <th style={{ textAlign: "left", padding: "0.5rem 1rem 0.5rem 0" }}>#</th>
+                              <th style={{ textAlign: "left", padding: "0.5rem 1rem 0.5rem 0" }}>Time</th>
+                              <th style={{ textAlign: "left", padding: "0.5rem 1rem 0.5rem 0" }}>URN</th>
+                              <th style={{ textAlign: "left", padding: "0.5rem 1rem 0.5rem 0" }}>Address</th>
+                              <th style={{ textAlign: "left", padding: "0.5rem 0" }}>Travel</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr style={{ borderBottom: "1px solid #f3f4f6" }}>
+                              <td style={{ padding: "0.5rem 1rem 0.5rem 0", color: "#9ca3af" }}>S</td>
+                              <td style={{ padding: "0.5rem 1rem 0.5rem 0" }}>{schedule.leaveTimeMins != null ? minsToDisplay(schedule.leaveTimeMins) : "—"}</td>
+                              <td style={{ padding: "0.5rem 1rem 0.5rem 0", color: "#9ca3af" }} colSpan={2}>Start — {schedule.startAddress}</td>
+                              <td />
+                            </tr>
+                            {sortedA.map((a, idx) => {
+                              const appt = geocodedAppts.find(ap => ap.id === a.apptId);
+                              if (!appt) return null;
+                              return (
+                                <tr key={a.apptId} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                                  <td style={{ padding: "0.5rem 1rem 0.5rem 0" }}>{idx + 1}</td>
+                                  <td style={{ padding: "0.5rem 1rem 0.5rem 0", fontFamily: "monospace" }}>{toDisplayTime(appt.timeHHMM)}</td>
+                                  <td style={{ padding: "0.5rem 1rem 0.5rem 0", fontFamily: "monospace" }}>{appt.urn ?? "—"}</td>
+                                  <td style={{ padding: "0.5rem 1rem 0.5rem 0" }}>{appt.address}</td>
+                                  <td style={{ padding: "0.5rem 0", color: "#6b7280" }}>{formatDurationSec(a.travelSec)}</td>
+                                </tr>
+                              );
+                            })}
+                            <tr>
+                              <td style={{ padding: "0.5rem 1rem 0.5rem 0", color: "#9ca3af" }}>E</td>
+                              <td style={{ padding: "0.5rem 1rem 0.5rem 0" }}>{schedule.estimatedReturnTimeMins != null ? minsToDisplay(schedule.estimatedReturnTimeMins) : "—"}</td>
+                              <td style={{ padding: "0.5rem 1rem 0.5rem 0", color: "#9ca3af" }} colSpan={2}>End — {schedule.endAddress}</td>
+                              <td />
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })}
+              </div>,
+              document.body
+            )}
           </div>
         );
       })()}
