@@ -125,6 +125,8 @@ export interface LocationMatrix {
   repStartIndices: number[];
   repEndIndices: number[];
   apptIndices: number[];
+  /** One entry per base in bases[] order. -1 if the base has no coordinates. */
+  baseIndices: number[];
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -249,7 +251,16 @@ export function buildLocationMatrix(
     apptIndices.push(addLoc(appt.lat!, appt.lng!));
   }
 
-  return { locations, repStartIndices, repEndIndices, apptIndices };
+  const baseIndices: number[] = [];
+  for (const base of bases) {
+    if (base.lat != null && base.lng != null) {
+      baseIndices.push(addLoc(base.lat, base.lng));
+    } else {
+      baseIndices.push(-1);
+    }
+  }
+
+  return { locations, repStartIndices, repEndIndices, apptIndices, baseIndices };
 }
 
 /** Returns true if the appointment falls within the rep's working window. */
@@ -262,6 +273,300 @@ function isInTimeWindow(rep: Rep, apptTimeMins: number, apptEndMins: number): bo
   if (!noStart && apptTimeMins < parseHHMM(st)) return false;
   if (!noEnd   && apptEndMins  > parseHHMM(et)) return false;
   return true;
+}
+
+// ── Post-processing helpers ───────────────────────────────────────────────────
+
+/** Total drive seconds: rep start → appointments in order → rep end. */
+function seqTravelSec(
+  apptIds: string[],
+  repIdx: number,
+  geocodedAppts: ApptInput[],
+  travelMatrix: (number | null)[][],
+  locMatrix: LocationMatrix,
+): number {
+  let total = 0;
+  let prev = locMatrix.repStartIndices[repIdx];
+  for (const id of apptIds) {
+    const idx = locMatrix.apptIndices[geocodedAppts.findIndex(a => a.id === id)];
+    total += travelMatrix[prev]?.[idx] ?? 0;
+    prev = idx;
+  }
+  return total + (travelMatrix[prev]?.[locMatrix.repEndIndices[repIdx]] ?? 0);
+}
+
+/** True if a time-sorted apptId sequence is travel-feasible for a rep. */
+function seqFeasible(
+  apptIds: string[],
+  rep: Rep,
+  repIdx: number,
+  geocodedAppts: ApptInput[],
+  travelMatrix: (number | null)[][],
+  locMatrix: LocationMatrix,
+  durationMins: number,
+): boolean {
+  const BUFFER_SEC = 15 * 60;
+  let prev = locMatrix.repStartIndices[repIdx];
+  let prevEnd = 0;
+  for (const id of apptIds) {
+    const appt = geocodedAppts.find(a => a.id === id);
+    if (!appt) return false;
+    const idx = locMatrix.apptIndices[geocodedAppts.findIndex(a => a.id === id)];
+    const t = parseHHMM(appt.timeHHMM);
+    if (!isInTimeWindow(rep, t, t + durationMins)) return false;
+    const travel = travelMatrix[prev]?.[idx] ?? null;
+    if (travel === null || travel > (t - prevEnd) * 60 + BUFFER_SEC) return false;
+    prev = idx;
+    prevEnd = t + durationMins;
+  }
+  return true;
+}
+
+/** Build Assignment[] with correct travelSec + status from a time-sorted apptId list. */
+function makeAssignments(
+  apptIds: string[],
+  repId: string,
+  repIdx: number,
+  geocodedAppts: ApptInput[],
+  travelMatrix: (number | null)[][],
+  locMatrix: LocationMatrix,
+  durationMins: number,
+): Assignment[] {
+  const BUFFER_SEC = 15 * 60;
+  const result: Assignment[] = [];
+  let prev = locMatrix.repStartIndices[repIdx];
+  let prevEnd = 0;
+  for (const id of apptIds) {
+    const appt = geocodedAppts.find(a => a.id === id)!;
+    const idx = locMatrix.apptIndices[geocodedAppts.findIndex(a => a.id === id)];
+    const t = parseHHMM(appt.timeHHMM);
+    const travel = travelMatrix[prev]?.[idx] ?? 0;
+    const avail = (t - prevEnd) * 60;
+    const status: ConflictStatus =
+      travel > avail + BUFFER_SEC ? "infeasible_travel" :
+      travel > avail              ? "buffered" : "ok";
+    result.push({ apptId: id, repId, travelSec: travel, status });
+    prev = idx;
+    prevEnd = t + durationMins;
+  }
+  return result;
+}
+
+/** Recompute leaveTimeMins, returnTravelSec, estimatedReturnTimeMins from current assignments. */
+function rebuildScheduleMeta(
+  sched: RepSchedule,
+  repIdx: number,
+  geocodedAppts: ApptInput[],
+  travelMatrix: (number | null)[][],
+  locMatrix: LocationMatrix,
+  durationMins: number,
+): void {
+  if (sched.assignments.length === 0) return;
+  const first = geocodedAppts.find(a => a.id === sched.assignments[0].apptId)!;
+  const firstIdx = locMatrix.apptIndices[geocodedAppts.findIndex(a => a.id === first.id)];
+  const toFirst = travelMatrix[locMatrix.repStartIndices[repIdx]]?.[firstIdx] ?? 0;
+  sched.leaveTimeMins = parseHHMM(first.timeHHMM) - Math.ceil(toFirst / 60);
+  const last = geocodedAppts.find(a => a.id === sched.assignments.at(-1)!.apptId)!;
+  const lastIdx = locMatrix.apptIndices[geocodedAppts.findIndex(a => a.id === last.id)];
+  const returnSec = travelMatrix[lastIdx]?.[locMatrix.repEndIndices[repIdx]] ?? null;
+  sched.returnTravelSec = returnSec;
+  sched.estimatedReturnTimeMins = returnSec !== null
+    ? parseHHMM(last.timeHHMM) + durationMins + Math.ceil(returnSec / 60) : null;
+}
+
+/**
+ * Swap pass: try all pairwise single-appointment swaps between reps.
+ * Applies any swap that reduces total drive time and keeps both sequences feasible.
+ * Repeats until no further improvement.
+ */
+function applySwapPass(
+  schedules: RepSchedule[],
+  workingReps: Rep[],
+  geocodedAppts: ApptInput[],
+  durationHours: number,
+  travelMatrix: (number | null)[][],
+  locMatrix: LocationMatrix,
+): void {
+  const durationMins = durationHours * 60;
+  const byTime = (a: string, b: string) =>
+    parseHHMM(geocodedAppts.find(x => x.id === a)?.timeHHMM ?? "0000") -
+    parseHHMM(geocodedAppts.find(x => x.id === b)?.timeHHMM ?? "0000");
+
+  let improved = true;
+  while (improved) {
+    improved = false;
+    outer: for (let ai = 0; ai < schedules.length; ai++) {
+      for (let bi = ai + 1; bi < schedules.length; bi++) {
+        const sa = schedules[ai], sb = schedules[bi];
+        const rai = workingReps.findIndex(r => r.id === sa.repId);
+        const rbi = workingReps.findIndex(r => r.id === sb.repId);
+        const ra = workingReps[rai], rb = workingReps[rbi];
+        if (!ra || !rb) continue;
+
+        for (let pi = 0; pi < sa.assignments.length; pi++) {
+          for (let pj = 0; pj < sb.assignments.length; pj++) {
+            const idA = sa.assignments[pi].apptId;
+            const idB = sb.assignments[pj].apptId;
+            const newA = sa.assignments.map((x, i) => i === pi ? idB : x.apptId).sort(byTime);
+            const newB = sb.assignments.map((x, j) => j === pj ? idA : x.apptId).sort(byTime);
+            if (!seqFeasible(newA, ra, rai, geocodedAppts, travelMatrix, locMatrix, durationMins)) continue;
+            if (!seqFeasible(newB, rb, rbi, geocodedAppts, travelMatrix, locMatrix, durationMins)) continue;
+            const oldCost = seqTravelSec(sa.assignments.map(x => x.apptId), rai, geocodedAppts, travelMatrix, locMatrix)
+                          + seqTravelSec(sb.assignments.map(x => x.apptId), rbi, geocodedAppts, travelMatrix, locMatrix);
+            const newCost = seqTravelSec(newA, rai, geocodedAppts, travelMatrix, locMatrix)
+                          + seqTravelSec(newB, rbi, geocodedAppts, travelMatrix, locMatrix);
+            if (newCost >= oldCost) continue;
+            sa.assignments = makeAssignments(newA, ra.id, rai, geocodedAppts, travelMatrix, locMatrix, durationMins);
+            sb.assignments = makeAssignments(newB, rb.id, rbi, geocodedAppts, travelMatrix, locMatrix, durationMins);
+            rebuildScheduleMeta(sa, rai, geocodedAppts, travelMatrix, locMatrix, durationMins);
+            rebuildScheduleMeta(sb, rbi, geocodedAppts, travelMatrix, locMatrix, durationMins);
+            improved = true;
+            break outer;
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Replace pass: for each unassigned appointment, check if any rep would reduce
+ * their total drive time by taking it instead of one of their current assignments.
+ * The displaced appointment returns to the unassigned pool. Repeats until stable.
+ */
+function applyReplacePass(
+  schedules: RepSchedule[],
+  unassigned: ScheduleResult["unassigned"],
+  workingReps: Rep[],
+  geocodedAppts: ApptInput[],
+  durationHours: number,
+  travelMatrix: (number | null)[][],
+  locMatrix: LocationMatrix,
+): void {
+  const durationMins = durationHours * 60;
+  const byTime = (a: string, b: string) =>
+    parseHHMM(geocodedAppts.find(x => x.id === a)?.timeHHMM ?? "0000") -
+    parseHHMM(geocodedAppts.find(x => x.id === b)?.timeHHMM ?? "0000");
+
+  let improved = true;
+  while (improved) {
+    improved = false;
+    for (let ui = 0; ui < unassigned.length; ui++) {
+      const uAppt = geocodedAppts.find(a => a.id === unassigned[ui].apptId);
+      if (!uAppt) continue;
+      let bestGain = 0, bestSi = -1, bestAi = -1;
+      for (let si = 0; si < schedules.length; si++) {
+        const sched = schedules[si];
+        const repIdx = workingReps.findIndex(r => r.id === sched.repId);
+        const rep = workingReps[repIdx];
+        if (!rep) continue;
+        for (let ai = 0; ai < sched.assignments.length; ai++) {
+          const newIds = sched.assignments.map((x, i) => i === ai ? uAppt.id : x.apptId).sort(byTime);
+          if (!seqFeasible(newIds, rep, repIdx, geocodedAppts, travelMatrix, locMatrix, durationMins)) continue;
+          const oldCost = seqTravelSec(sched.assignments.map(x => x.apptId), repIdx, geocodedAppts, travelMatrix, locMatrix);
+          const newCost = seqTravelSec(newIds, repIdx, geocodedAppts, travelMatrix, locMatrix);
+          const gain = oldCost - newCost;
+          if (gain > bestGain) { bestGain = gain; bestSi = si; bestAi = ai; }
+        }
+      }
+      if (bestSi >= 0) {
+        const sched = schedules[bestSi];
+        const repIdx = workingReps.findIndex(r => r.id === sched.repId);
+        const rep = workingReps[repIdx];
+        const displaced = sched.assignments[bestAi].apptId;
+        const newIds = sched.assignments.map((x, i) => i === bestAi ? uAppt.id : x.apptId).sort(byTime);
+        sched.assignments = makeAssignments(newIds, rep.id, repIdx, geocodedAppts, travelMatrix, locMatrix, durationMins);
+        rebuildScheduleMeta(sched, repIdx, geocodedAppts, travelMatrix, locMatrix, durationMins);
+        unassigned[ui] = { apptId: displaced, reason: "Displaced by closer appointment" };
+        improved = true;
+        break;
+      }
+    }
+  }
+}
+
+/**
+ * Fallback pass: assign remaining unassigned appointments to any rep with raw
+ * capacity (count < maxAppointments), bypassing tier reservations.
+ * Picks the closest feasible rep at the correct insertion point.
+ */
+function applyFallbackPass(
+  schedules: RepSchedule[],
+  unassigned: ScheduleResult["unassigned"],
+  workingReps: Rep[],
+  geocodedAppts: ApptInput[],
+  durationHours: number,
+  travelMatrix: (number | null)[][],
+  locMatrix: LocationMatrix,
+  bases: SalesBase[],
+): void {
+  const BUFFER_SEC = 15 * 60;
+  const durationMins = durationHours * 60;
+  const stillUnassigned: ScheduleResult["unassigned"] = [];
+
+  for (const entry of unassigned) {
+    const appt = geocodedAppts.find(a => a.id === entry.apptId);
+    if (!appt) { stillUnassigned.push(entry); continue; }
+    const apptT   = parseHHMM(appt.timeHHMM);
+    const apptEnd = apptT + durationMins;
+    const apptIdx = locMatrix.apptIndices[geocodedAppts.findIndex(a => a.id === appt.id)];
+
+    let bestRep: Rep | null = null, bestRepIdx = -1, bestTravel = Infinity;
+    let bestInsert = -1, bestPrevEnd = 0;
+
+    for (let i = 0; i < workingReps.length; i++) {
+      const rep = workingReps[i];
+      if (!isInTimeWindow(rep, apptT, apptEnd)) continue;
+      const sched = schedules.find(s => s.repId === rep.id);
+      if ((sched?.assignments.length ?? 0) >= rep.maxAppointments) continue;
+      const asgns = sched?.assignments ?? [];
+      const ins = asgns.findIndex(a => {
+        const t = geocodedAppts.find(ap => ap.id === a.apptId);
+        return t ? parseHHMM(t.timeHHMM) > apptT : false;
+      });
+      const pos = ins === -1 ? asgns.length : ins;
+      const prevLoc = pos === 0
+        ? locMatrix.repStartIndices[i]
+        : locMatrix.apptIndices[geocodedAppts.findIndex(a => a.id === asgns[pos - 1].apptId)];
+      const prevEnd = pos === 0
+        ? 0
+        : parseHHMM(geocodedAppts.find(a => a.id === asgns[pos - 1].apptId)!.timeHHMM) + durationMins;
+      const travel = travelMatrix[prevLoc]?.[apptIdx] ?? null;
+      if (travel === null || travel > (apptT - prevEnd) * 60 + BUFFER_SEC) continue;
+      if (pos < asgns.length) {
+        const nextAppt = geocodedAppts.find(a => a.id === asgns[pos].apptId)!;
+        const nextIdx  = locMatrix.apptIndices[geocodedAppts.findIndex(a => a.id === nextAppt.id)];
+        const toNext   = travelMatrix[apptIdx]?.[nextIdx] ?? null;
+        if (toNext === null || toNext > (parseHHMM(nextAppt.timeHHMM) - apptEnd) * 60 + BUFFER_SEC) continue;
+      }
+      if (travel < bestTravel) {
+        bestTravel = travel; bestRep = rep; bestRepIdx = i; bestInsert = pos; bestPrevEnd = prevEnd;
+      }
+    }
+
+    if (bestRep && bestRepIdx >= 0) {
+      const avail = (apptT - bestPrevEnd) * 60;
+      const status: ConflictStatus =
+        bestTravel > avail + BUFFER_SEC ? "infeasible_travel" :
+        bestTravel > avail              ? "buffered" : "ok";
+      const newAsgn: Assignment = { apptId: appt.id, repId: bestRep.id, travelSec: bestTravel, status };
+      let sched = schedules.find(s => s.repId === bestRep!.id);
+      if (sched) {
+        sched.assignments.splice(bestInsert, 0, newAsgn);
+      } else {
+        const startLoc = getRepStartLoc(bestRep, bases);
+        const endLoc   = getRepEndLoc(bestRep, bases);
+        sched = { repId: bestRep.id, assignments: [newAsgn], leaveTimeMins: null,
+          returnTravelSec: null, estimatedReturnTimeMins: null,
+          startAddress: startLoc.address, endAddress: endLoc.address };
+        schedules.push(sched);
+      }
+      rebuildScheduleMeta(sched, bestRepIdx, geocodedAppts, travelMatrix, locMatrix, durationMins);
+    } else {
+      stillUnassigned.push(entry);
+    }
+  }
+  unassigned.splice(0, unassigned.length, ...stillUnassigned);
 }
 
 // ── Scheduling ────────────────────────────────────────────────────────────────
@@ -294,6 +599,25 @@ export function scheduleAppointments(
     });
   }
 
+  // Pre-compute each appointment's base using drive time from the travel matrix.
+  // This is more accurate than Euclidean distance in Scotland where road geography
+  // frequently diverges from straight-line proximity (mountains, lochs, firths).
+  // Falls back to Euclidean if a base has no coords or travel data is missing.
+  const apptBaseIds = new Map<string, string>();
+  for (let i = 0; i < geocodedAppts.length; i++) {
+    const apptLocIdx = locMatrix.apptIndices[i];
+    let bestId = "unassigned";
+    let bestTime = Infinity;
+    for (let b = 0; b < bases.length; b++) {
+      const baseIdx = locMatrix.baseIndices[b];
+      if (baseIdx < 0) continue;
+      const t = travelMatrix[apptLocIdx]?.[baseIdx] ?? null;
+      if (t !== null && t < bestTime) { bestTime = t; bestId = bases[b].id; }
+    }
+    if (bestId === "unassigned") bestId = getApptBaseId(geocodedAppts[i], bases);
+    apptBaseIds.set(geocodedAppts[i].id, bestId);
+  }
+
   // Pre-pass: reserve slots by priority tier so lower-priority appointments
   // cannot crowd out higher-priority ones.
   //   Tier 2 (tag match)  — same area + matching tag
@@ -312,7 +636,7 @@ export function scheduleAppointments(
       const apptTags = appt.tags ?? [];
       return apptTags.length > 0
         && apptTags.some((t) => repTags.includes(t))
-        && getApptBaseId(appt, bases) === repBaseId;
+        && (apptBaseIds.get(appt.id) ?? "unassigned") === repBaseId;
     }).length;
     const tagReserved = Math.min(tagCount, rep.maxAppointments);
 
@@ -320,7 +644,7 @@ export function scheduleAppointments(
       const apptTags = appt.tags ?? [];
       const isTagMatch = repTags.length > 0 && apptTags.length > 0
         && apptTags.some((t) => repTags.includes(t));
-      return getApptBaseId(appt, bases) === repBaseId && !isTagMatch;
+      return (apptBaseIds.get(appt.id) ?? "unassigned") === repBaseId && !isTagMatch;
     }).length;
     const areaReserved = Math.min(areaOnlyCount, rep.maxAppointments - tagReserved);
 
@@ -339,7 +663,7 @@ export function scheduleAppointments(
     const apptTimeMins = parseHHMM(appt.timeHHMM);
     const apptEndMins  = apptTimeMins + durationMins;
     const apptLocIdx   = locMatrix.apptIndices[geocodedAppts.findIndex((a) => a.id === appt.id)];
-    const apptBaseId   = getApptBaseId(appt, bases);
+    const apptBaseId   = apptBaseIds.get(appt.id) ?? "unassigned";
     const apptTags     = appt.tags ?? [];
 
     let anyInWindow    = false;
@@ -467,6 +791,10 @@ export function scheduleAppointments(
       endAddress:   endLoc.address,
     });
   }
+
+  applySwapPass(schedules, workingReps, geocodedAppts, durationHours, travelMatrix, locMatrix);
+  applyReplacePass(schedules, unassigned, workingReps, geocodedAppts, durationHours, travelMatrix, locMatrix);
+  applyFallbackPass(schedules, unassigned, workingReps, geocodedAppts, durationHours, travelMatrix, locMatrix, bases);
 
   return { schedules, unassigned };
 }
