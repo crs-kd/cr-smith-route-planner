@@ -448,7 +448,7 @@ function RepEditForm({
 
 function SortableRepCard({
   rep, bases, editingId, form, setForm, geocoding, isFirst, isLast,
-  onToggleWorking, onStartEdit, onDelete, onSave, onCancel, onMoveUp, onMoveDown, onUpdateRepTags,
+  onToggleWorking, onStartEdit, onDelete, onSave, onCancel, onMoveUp, onMoveDown, onUpdateRepTags, onQuickUpdate,
 }: {
   rep: Rep;
   bases: SalesBase[];
@@ -466,6 +466,7 @@ function SortableRepCard({
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
   onUpdateRepTags: (repId: string, tag: ApptTag) => void;
+  onQuickUpdate: (id: string, patch: Partial<Rep>) => void;
 }) {
   const customTags = useCustomTags();
   const isEditing = editingId === rep.id;
@@ -525,22 +526,52 @@ function SortableRepCard({
           </button>
           <div className="flex-1 min-w-0">
             <p className={`text-sm font-semibold ${rep.isWorking ? "text-coal" : "text-coal/40"}`}>{rep.name}</p>
-            <p className="text-xs text-coal/50 truncate">{rep.homeAddress}</p>
+            {/* Inline start location dropdown */}
+            <select
+              value={rep.startLocation === "base" && rep.startBaseId ? rep.startBaseId : "home"}
+              onChange={e => {
+                const v = e.target.value;
+                if (v === "home") onQuickUpdate(rep.id, { startLocation: "home", startBaseId: undefined });
+                else onQuickUpdate(rep.id, { startLocation: "base", startBaseId: v });
+              }}
+              className="mt-0.5 text-xs text-coal/60 bg-transparent border-0 outline-none cursor-pointer hover:text-coal transition-colors -ml-0.5 max-w-full"
+            >
+              <option value="home">{rep.homeAddress || "Home"}</option>
+              {bases.map(b => <option key={b.id} value={b.id}>{b.name} base</option>)}
+            </select>
             {!rep.homeLat && <p className="text-xs text-amber-600 mt-0.5">⚠ Address not geocoded</p>}
-            <div className="flex gap-2 mt-1 flex-wrap text-xs text-coal/50">
-              <span className="font-mono">
-                {normaliseHHMM(rep.startTime) === "0000" ? "Any start" : toDisplayTime(rep.startTime)}
-                {" – "}
-                {normaliseHHMM(rep.endTime) === "0000" ? "any end" : toDisplayTime(rep.endTime)}
-              </span>
+            <div className="flex gap-1.5 mt-1 flex-wrap items-center text-xs text-coal/50">
+              {/* Inline time range */}
+              <input
+                type="text" maxLength={5}
+                defaultValue={normaliseHHMM(rep.startTime) === "0000" ? "" : toDisplayTime(rep.startTime)}
+                placeholder="Any"
+                onBlur={e => onQuickUpdate(rep.id, { startTime: normaliseHHMM(e.target.value) || "0000" })}
+                onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                className="font-mono w-10 bg-transparent outline-none border-b border-transparent hover:border-gray-300 focus:border-loch text-center transition-colors"
+                aria-label="Start time"
+              />
+              <span>–</span>
+              <input
+                type="text" maxLength={5}
+                defaultValue={normaliseHHMM(rep.endTime) === "0000" ? "" : toDisplayTime(rep.endTime)}
+                placeholder="Any"
+                onBlur={e => onQuickUpdate(rep.id, { endTime: normaliseHHMM(e.target.value) || "0000" })}
+                onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                className="font-mono w-10 bg-transparent outline-none border-b border-transparent hover:border-gray-300 focus:border-loch text-center transition-colors"
+                aria-label="End time"
+              />
               <span>·</span>
-              <span>{rep.maxAppointments} appt{rep.maxAppointments === 1 ? "" : "s"}</span>
-              {rep.startLocation === "base" && rep.startBaseId && (
-                <><span>·</span><span>Start: {bases.find(b => b.id === rep.startBaseId)?.name ?? rep.startBaseId}</span></>
-              )}
-              {rep.endLocation === "base" && rep.endBaseId && (
-                <><span>·</span><span>End: {bases.find(b => b.id === rep.endBaseId)?.name ?? rep.endBaseId}</span></>
-              )}
+              {/* Inline max appointments */}
+              <input
+                type="number" min={1} max={99}
+                defaultValue={rep.maxAppointments}
+                onBlur={e => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) onQuickUpdate(rep.id, { maxAppointments: v }); }}
+                onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                className="w-6 bg-transparent outline-none border-b border-transparent hover:border-gray-300 focus:border-loch text-center transition-colors"
+                aria-label="Max appointments"
+              />
+              <span>appt{rep.maxAppointments === 1 ? "" : "s"}</span>
             </div>
           </div>
           <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
@@ -595,7 +626,7 @@ function SortableGroup({
   baseId, baseName, groupReps, bases, editingId, form, setForm, geocoding,
   isFirst, isLast,
   onToggleWorking, onStartEdit, onDelete, onSave, onCancel,
-  onMoveGroupUp, onMoveGroupDown, onMoveRepUp, onMoveRepDown, onUpdateRepTags,
+  onMoveGroupUp, onMoveGroupDown, onMoveRepUp, onMoveRepDown, onUpdateRepTags, onQuickUpdate,
 }: {
   baseId: string;
   baseName: string;
@@ -617,6 +648,7 @@ function SortableGroup({
   onMoveRepUp: (repId: string) => void;
   onMoveRepDown: (repId: string) => void;
   onUpdateRepTags: (repId: string, tag: ApptTag) => void;
+  onQuickUpdate: (id: string, patch: Partial<Rep>) => void;
 }) {
   const isNewRepInThisGroup = editingId !== null && !groupReps.find(r => r.id === editingId) &&
     form.id === editingId && (form as { _groupId?: string })._groupId === baseId;
@@ -676,6 +708,7 @@ function SortableGroup({
               onDelete={onDelete} onSave={onSave} onCancel={onCancel}
               onMoveUp={onMoveRepUp} onMoveDown={onMoveRepDown}
               onUpdateRepTags={onUpdateRepTags}
+              onQuickUpdate={onQuickUpdate}
             />
           ))}
         </SortableContext>
@@ -922,6 +955,7 @@ function RepManager({
                   const next = current.includes(tag) ? current.filter(t => t !== tag) : [...current, tag];
                   return { ...r, tags: next };
                 }))}
+                onQuickUpdate={(id, patch) => onChange(reps.map(r => r.id === id ? { ...r, ...patch } : r))}
               />
             ))}
           </SortableContext>
@@ -1221,6 +1255,10 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
 
     const recalculated = recalculateSchedules(schedules, unassigned, workingReps, geocodedAppts, durationHours, travelMatrix, locMatrix, bases);
     setScheduleResult(recalculated);
+    // Refresh the open rep's map route to reflect the reassignment
+    if (expandedRepId) {
+      setTimeout(() => handleToggleRep(expandedRepId), 0);
+    }
   }
 
   function jumpToRep(apptId: string) {
@@ -1446,7 +1484,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
               </button>
               <button onClick={() => fileRef.current?.click()}
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-coal/60 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors" aria-label="Upload CSV">
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L5 7m3 3 3-3M2 12v1a1 1 0 001 1h10a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 10V1m0 0L5 4m3-3 3 3M2 12v1a1 1 0 001 1h10a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 CSV
               </button>
               <input ref={fileRef} type="file" accept=".csv" onChange={handleCSV} className="hidden" aria-hidden="true"/>
