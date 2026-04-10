@@ -541,11 +541,15 @@ function SortableRepCard({
             </select>
             {!rep.homeLat && <p className="text-xs text-amber-600 mt-0.5">⚠ Address not geocoded</p>}
             <div className="flex gap-1.5 mt-1 flex-wrap items-center text-xs text-coal/50">
-              {/* Inline time range */}
+              {/* Inline time range — auto-inserts colon after 2 digits */}
               <input
                 type="text" maxLength={5}
                 defaultValue={normaliseHHMM(rep.startTime) === "0000" ? "" : toDisplayTime(rep.startTime)}
                 placeholder="Any"
+                onChange={e => {
+                  const raw = e.target.value.replace(/\D/g, "");
+                  if (raw.length >= 3) e.target.value = `${raw.slice(0,2)}:${raw.slice(2,4)}`;
+                }}
                 onBlur={e => onQuickUpdate(rep.id, { startTime: normaliseHHMM(e.target.value) || "0000" })}
                 onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
                 className="font-mono w-10 bg-transparent outline-none border-b border-transparent hover:border-gray-300 focus:border-loch text-center transition-colors"
@@ -556,19 +560,23 @@ function SortableRepCard({
                 type="text" maxLength={5}
                 defaultValue={normaliseHHMM(rep.endTime) === "0000" ? "" : toDisplayTime(rep.endTime)}
                 placeholder="Any"
+                onChange={e => {
+                  const raw = e.target.value.replace(/\D/g, "");
+                  if (raw.length >= 3) e.target.value = `${raw.slice(0,2)}:${raw.slice(2,4)}`;
+                }}
                 onBlur={e => onQuickUpdate(rep.id, { endTime: normaliseHHMM(e.target.value) || "0000" })}
                 onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
                 className="font-mono w-10 bg-transparent outline-none border-b border-transparent hover:border-gray-300 focus:border-loch text-center transition-colors"
                 aria-label="End time"
               />
               <span>·</span>
-              {/* Inline max appointments */}
+              {/* Inline max appointments — text input to avoid browser number arrows */}
               <input
-                type="number" min={1} max={99}
+                type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2}
                 defaultValue={rep.maxAppointments}
-                onBlur={e => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) onQuickUpdate(rep.id, { maxAppointments: v }); }}
+                onBlur={e => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) onQuickUpdate(rep.id, { maxAppointments: v }); else e.target.value = String(rep.maxAppointments); }}
                 onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-                className="w-6 bg-transparent outline-none border-b border-transparent hover:border-gray-300 focus:border-loch text-center transition-colors"
+                className="w-5 bg-transparent outline-none border-b border-transparent hover:border-gray-300 focus:border-loch text-center transition-colors"
                 aria-label="Max appointments"
               />
               <span>appt{rep.maxAppointments === 1 ? "" : "s"}</span>
@@ -1255,9 +1263,9 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
 
     const recalculated = recalculateSchedules(schedules, unassigned, workingReps, geocodedAppts, durationHours, travelMatrix, locMatrix, bases);
     setScheduleResult(recalculated);
-    // Refresh the open rep's map route to reflect the reassignment
+    // Refresh the open rep's map route without toggling it closed
     if (expandedRepId) {
-      setTimeout(() => handleToggleRep(expandedRepId), 0);
+      setTimeout(() => refreshRepMap(expandedRepId, recalculated), 0);
     }
   }
 
@@ -1270,6 +1278,39 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
     setTimeout(() => {
       document.querySelector(`[data-rep-id="${repId}"]`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 50);
+  }
+
+  /** Re-fetch route geometry for an already-expanded rep after reassignment. */
+  async function refreshRepMap(repId: string, result: ScheduleResult) {
+    const rep      = reps.find((r) => r.id === repId);
+    const schedule = result.schedules.find((s) => s.repId === repId);
+    if (!rep?.homeLat || !rep?.homeLng || !schedule) { onRoutePreview(null); return; }
+    const startLoc = getRepStartLoc(rep);
+    const orderedAppts = [...schedule.assignments]
+      .sort((a, b) => {
+        const ta = geocodedAppts.find((ap) => ap.id === a.apptId);
+        const tb = geocodedAppts.find((ap) => ap.id === b.apptId);
+        return (ta ? parseHHMM(ta.timeHHMM) : 0) - (tb ? parseHHMM(tb.timeHHMM) : 0);
+      })
+      .map((a) => geocodedAppts.find((ap) => ap.id === a.apptId))
+      .filter((a): a is ApptInput => !!a && a.lat != null && a.lng != null);
+    if (orderedAppts.length === 0) { onRoutePreview(null); return; }
+    const endLoc = getRepEndLoc(rep);
+    const waypoints = [startLoc, ...orderedAppts.map((a) => ({ lat: a.lat!, lng: a.lng! })), endLoc];
+    const coords = waypoints.map((w) => `${w.lng},${w.lat}`).join(";");
+    let geometry: [number, number][] | null = null;
+    try {
+      const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
+      const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
+      if (data.routes?.[0]?.geometry?.coordinates) {
+        geometry = data.routes[0].geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number]);
+      }
+    } catch { /* straight lines */ }
+    onRoutePreview({
+      anchor: { address: startLoc.address, lat: startLoc.lat, lng: startLoc.lng },
+      stops: orderedAppts.map((a, i) => ({ id: i, lat: a.lat!, lng: a.lng!, addresses: [{ address: a.urn ? `${a.urn} — ${a.address}` : a.address }] })),
+      geometry,
+    });
   }
 
   async function handleToggleRep(repId: string) {
