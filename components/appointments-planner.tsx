@@ -1365,21 +1365,19 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                       return (
                         <tr key={appt.id} className={`border-b border-snow last:border-b-0 ${isFailed ? "bg-amber-50" : ""}`}>
                           <td className="px-2 py-1.5">
-                            <div className="flex items-center gap-1">
+                            {repForAppt.has(appt.id) ? (
+                              <button
+                                onClick={() => jumpToRep(appt.id)}
+                                title="Jump to assigned rep"
+                                className="w-full text-left text-xs font-mono text-saltire hover:underline truncate"
+                              >
+                                {appt.urn || <span className="opacity-40">URN</span>}
+                              </button>
+                            ) : (
                               <input value={appt.urn ?? ""} onChange={(e) => updateAppt(appt.id, "urn", e.target.value)}
                                 placeholder="URN"
                                 className="w-full text-xs font-mono text-coal bg-transparent outline-none placeholder-coal/30 focus:bg-white rounded px-0.5 transition-colors" />
-                              {repForAppt.has(appt.id) && (
-                                <button
-                                  onClick={() => jumpToRep(appt.id)}
-                                  title="Jump to assigned rep"
-                                  className="flex-shrink-0 p-0.5 text-loch/40 hover:text-loch transition-colors"
-                                  aria-label="Jump to assigned rep"
-                                >
-                                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M8 3l5 5-5 5M3 8h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                                </button>
-                              )}
-                            </div>
+                            )}
                           </td>
                           <td className="px-2 py-1.5">
                             <div className="flex items-center gap-1">
@@ -1545,8 +1543,9 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
           {scheduleResult.schedules.map((schedule) => {
             const rep = reps.find((r) => r.id === schedule.repId);
             if (!rep) return null;
-            const isExpanded  = expandedRepId === schedule.repId;
-            const hasConflict = schedule.assignments.some((a) => a.status !== "ok");
+            const isExpanded   = expandedRepId === schedule.repId;
+            const hasConflict  = schedule.assignments.some((a) => a.status !== "ok");
+            const hasLongTravel = schedule.assignments.some((a) => a.travelSec > 7200);
 
             return (
               <div key={schedule.repId}
@@ -1564,9 +1563,14 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                       {schedule.leaveTimeMins != null && ` · Leave ${minsToDisplay(schedule.leaveTimeMins)}`}
                     </p>
                   </div>
-                  {hasConflict && (
-                    <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">Conflict</span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {hasLongTravel && (
+                      <span className="text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">+2h travel</span>
+                    )}
+                    {hasConflict && (
+                      <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">Conflict</span>
+                    )}
+                  </div>
                   <svg className={`w-4 h-4 text-coal/40 transition-transform ${isExpanded ? "rotate-180" : ""}`}
                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
