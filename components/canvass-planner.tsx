@@ -24,6 +24,7 @@ import {
   CanvassResult,
   DayPlan,
   migrateCanvasser,
+  groupAddressesToStops,
   buildCanvassLocationMatrix,
   scheduleCanvass,
 } from "@/lib/canvass-scheduler";
@@ -342,10 +343,7 @@ function SortableCanvasserCard({
               <option value="home">{canvasser.homeAddress || "Home"}</option>
               {bases.map((b) => <option key={b.id} value={b.id}>{b.name} base</option>)}
             </select>
-            {canvasser.homeLat && canvasser.homeLng
-              ? <p className="text-xs text-green-600 mt-0.5">✓ Geocoded: {canvasser.homeLat.toFixed(4)}, {canvasser.homeLng.toFixed(4)}</p>
-              : <p className="text-xs text-amber-600 mt-0.5">⚠ Address not geocoded</p>
-            }
+            {!canvasser.homeLat && <p className="text-xs text-amber-600 mt-0.5">⚠ Address not geocoded</p>}
             <div className="flex gap-1.5 mt-1 items-center text-xs text-coal/50">
               {/* Inline time fields */}
               <input
@@ -621,9 +619,11 @@ function DayCard({
   onToggleCanvasser: (canvasserId: string, dayDate: string) => void;
 }) {
   const addrById = new Map(addresses.map((a) => [a.id, a]));
-  const totalAddresses = dayPlan.routes.reduce((n, r) => n + r.addressIds.length, 0);
+  const totalAddresses = dayPlan.routes.reduce(
+    (n, r) => n + r.stops.reduce((m, s) => m + s.addressIds.length, 0),
+    0
+  );
 
-  // Format date nicely
   const dateObj = new Date(dayPlan.date + "T12:00:00");
   const dateLabel = dateObj.toLocaleDateString("en-GB", {
     weekday: "long", day: "numeric", month: "long",
@@ -645,7 +645,8 @@ function DayCard({
           const canvasser = canvassers.find((c) => c.id === route.canvasserId);
           if (!canvasser) return null;
           const isExpanded = expandedCanvasserId === `${route.canvasserId}:${dayPlan.date}`;
-          const totalTravelSec = route.travelSecs.reduce((s, t) => s + t, 0);
+          const totalTravelSec = route.stops.reduce((s, st) => s + st.travelSec, 0);
+          const totalRouteAddresses = route.stops.reduce((n, s) => n + s.addressIds.length, 0);
 
           return (
             <div key={route.canvasserId} className="bg-white">
@@ -656,7 +657,10 @@ function DayCard({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-coal">{canvasser.name}</p>
                   <p className="text-xs text-coal/50 mt-0.5">
-                    {route.addressIds.length} address{route.addressIds.length === 1 ? "" : "es"}
+                    {totalRouteAddresses} address{totalRouteAddresses === 1 ? "" : "es"}
+                    {route.stops.length < totalRouteAddresses && (
+                      <> · {route.stops.length} stop{route.stops.length === 1 ? "" : "s"}</>
+                    )}
                     {totalTravelSec > 0 && (
                       <> · ~{formatDurationSec(totalTravelSec)} drive</>
                     )}
@@ -672,19 +676,36 @@ function DayCard({
 
               {isExpanded && (
                 <div className="border-t border-gray-100 px-4 pb-3">
-                  <ol className="space-y-1.5 mt-2">
-                    {route.addressIds.map((id, idx) => {
-                      const addr = addrById.get(id);
-                      const travel = route.travelSecs[idx] ?? 0;
+                  <ol className="space-y-2 mt-2">
+                    {route.stops.map((stop, idx) => {
+                      const stopAddresses = stop.addressIds
+                        .map((id) => addrById.get(id))
+                        .filter(Boolean) as CanvassAddress[];
+                      const isMulti = stopAddresses.length > 1;
                       return (
-                        <li key={id} className="flex gap-2 text-xs">
-                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-loch/10 text-loch font-semibold flex items-center justify-center text-[10px]">
+                        <li key={stop.addressIds[0]} className="flex gap-2 text-xs">
+                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-loch/10 text-loch font-semibold flex items-center justify-center text-[10px] mt-0.5">
                             {idx + 1}
                           </span>
                           <div className="flex-1 min-w-0">
-                            <p className="text-coal/80 truncate">{addr?.address ?? id}</p>
-                            {idx > 0 && travel > 0 && (
-                              <p className="text-coal/40">{formatDurationSec(travel)} from previous</p>
+                            {isMulti ? (
+                              <>
+                                <p className="font-medium text-coal/80">
+                                  {stopAddresses.length} addresses at this location
+                                </p>
+                                <ul className="mt-0.5 space-y-0.5 pl-1">
+                                  {stopAddresses.map((a) => (
+                                    <li key={a.id} className="text-coal/60 truncate before:content-['·'] before:mr-1">
+                                      {a.address}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </>
+                            ) : (
+                              <p className="text-coal/80 truncate">{stopAddresses[0]?.address ?? stop.addressIds[0]}</p>
+                            )}
+                            {idx > 0 && stop.travelSec > 0 && (
+                              <p className="text-coal/40 mt-0.5">{formatDurationSec(stop.travelSec)} from previous</p>
                             )}
                           </div>
                         </li>
@@ -848,11 +869,15 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
     }
     setGeocodedAddresses(geocoded);
 
+    // Group co-located addresses into stops (same lat/lng → one stop, n× duration)
+    const stops = groupAddressesToStops(geocoded);
+    const grouped = stops.length < geocoded.length;
+
     // Step 2: Build travel matrix
     setPhase("matrix");
-    setStatusMsg(`Building travel matrix for ${workingCanvassers.length} canvasser${workingCanvassers.length === 1 ? "" : "s"} + ${geocoded.length} addresses…`);
+    setStatusMsg(`Building travel matrix for ${workingCanvassers.length} canvasser${workingCanvassers.length === 1 ? "" : "s"} + ${stops.length} stop${stops.length === 1 ? "" : "s"}…`);
 
-    const locMatrix = buildCanvassLocationMatrix(workingCanvassers, geocoded, bases);
+    const locMatrix = buildCanvassLocationMatrix(workingCanvassers, stops, bases);
 
     let travelMatrix: (number | null)[][];
     try {
@@ -876,7 +901,7 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
 
     const result = scheduleCanvass(
       workingCanvassers,
-      geocoded,
+      stops,
       new Date(startDate + "T12:00:00"),
       bases,
       travelMatrix,
@@ -886,6 +911,7 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
     setCanvassResult(result);
 
     const totalAssigned = geocoded.length - result.unassigned.length;
+    void grouped; // used implicitly via stops.length in status message
     const failNote = failedCount > 0 ? ` · ${failedCount} address${failedCount === 1 ? "" : "es"} couldn't be geocoded` : "";
     setPhase("done");
     setStatusMsg(
@@ -917,13 +943,19 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
 
     const dayPlan = canvassResult.days.find((d) => d.date === date);
     const route   = dayPlan?.routes.find((r) => r.canvasserId === canvasserId);
-    if (!route || route.addressIds.length === 0) { onRoutePreview(null); return; }
+    if (!route || route.stops.length === 0) { onRoutePreview(null); return; }
 
     const addrById = new Map(geocodedAddresses.map((a) => [a.id, a]));
-    const orderedAddrs = route.addressIds.map((id) => addrById.get(id)).filter(
-      (a): a is CanvassAddress => !!a && a.lat != null && a.lng != null
-    );
-    if (orderedAddrs.length === 0) { onRoutePreview(null); return; }
+
+    // One waypoint per stop (unique lat/lng), with all address labels
+    const orderedStops = route.stops.map((s) => {
+      const addrs = s.addressIds.map((id) => addrById.get(id)).filter(
+        (a): a is CanvassAddress => !!a && a.lat != null && a.lng != null
+      );
+      return addrs.length > 0 ? { lat: addrs[0].lat!, lng: addrs[0].lng!, addrs } : null;
+    }).filter((s): s is NonNullable<typeof s> => s !== null);
+
+    if (orderedStops.length === 0) { onRoutePreview(null); return; }
 
     // Resolve start/end location
     const startBaseMatch = canvasser.startLocation === "base" && canvasser.startBaseId
@@ -942,7 +974,7 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
         ? { lat: endBaseMatch.lat, lng: endBaseMatch.lng }
         : { lat: canvasser.homeLat!, lng: canvasser.homeLng! };
 
-    const waypoints = [startPt, ...orderedAddrs.map((a) => ({ lat: a.lat!, lng: a.lng! })), endPt];
+    const waypoints = [startPt, ...orderedStops, endPt];
     const coords = waypoints.map((w) => `${w.lng},${w.lat}`).join(";");
 
     let geometry: [number, number][] | null = null;
@@ -962,11 +994,11 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
 
     onRoutePreview({
       anchor: { address: startPt.address, lat: startPt.lat, lng: startPt.lng },
-      stops: orderedAddrs.map((a, i) => ({
+      stops: orderedStops.map((s, i) => ({
         id: i,
-        lat: a.lat!,
-        lng: a.lng!,
-        addresses: [{ address: a.address }],
+        lat: s.lat,
+        lng: s.lng,
+        addresses: s.addrs.map((a) => ({ address: a.address })),
       })),
       geometry,
     });

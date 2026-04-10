@@ -41,13 +41,44 @@ export function migrateCanvasser(raw: Record<string, unknown>): Canvasser {
   };
 }
 
-// ── Address type ──────────────────────────────────────────────────────────────
+// ── Address / Stop types ──────────────────────────────────────────────────────
 
 export interface CanvassAddress {
   id: string;
   address: string;
   lat?: number;
   lng?: number;
+}
+
+/**
+ * A canvass stop is one physical location that may represent multiple addresses
+ * (e.g. several flats on the same street that geocode to the same point).
+ * Duration at the stop = durationPerAddress × addressIds.length.
+ */
+export interface CanvassStop {
+  /** Representative ID — the first address at this location */
+  id: string;
+  /** All address IDs at this location */
+  addressIds: string[];
+  lat: number;
+  lng: number;
+}
+
+/**
+ * Group geocoded addresses by their rounded lat/lng (5 d.p. ≈ 1 m).
+ * Addresses that land on the same point are merged into one stop.
+ */
+export function groupAddressesToStops(addresses: CanvassAddress[]): CanvassStop[] {
+  const stopMap = new Map<string, CanvassStop>();
+  for (const addr of addresses) {
+    const key = `${addr.lat!.toFixed(5)},${addr.lng!.toFixed(5)}`;
+    if (stopMap.has(key)) {
+      stopMap.get(key)!.addressIds.push(addr.id);
+    } else {
+      stopMap.set(key, { id: addr.id, addressIds: [addr.id], lat: addr.lat!, lng: addr.lng! });
+    }
+  }
+  return [...stopMap.values()];
 }
 
 // ── Result types ──────────────────────────────────────────────────────────────
@@ -57,16 +88,19 @@ export interface DayPlan {
   date: string;
   routes: {
     canvasserId: string;
-    /** Ordered address IDs */
-    addressIds: string[];
-    /** Travel seconds to each address from previous stop */
-    travelSecs: number[];
+    /** Ordered stops — each may contain multiple addresses at the same location */
+    stops: {
+      /** All address IDs at this location */
+      addressIds: string[];
+      /** Travel seconds to reach this stop from the previous one */
+      travelSec: number;
+    }[];
   }[];
 }
 
 export interface CanvassResult {
   days: DayPlan[];
-  /** Address IDs that could not be assigned within the day limit */
+  /** Individual address IDs that could not be assigned within the day limit */
   unassigned: string[];
 }
 
@@ -76,7 +110,8 @@ export interface CanvassLocationMatrix {
   locations: { lat: number; lng: number }[];
   canvasserStartIndices: number[];
   canvasserEndIndices: number[];
-  addressIndices: number[];
+  /** One index per CanvassStop (in the same order as the stops array) */
+  stopIndices: number[];
 }
 
 function getCanvasserStartLoc(
@@ -105,7 +140,7 @@ function getCanvasserEndLoc(
 
 export function buildCanvassLocationMatrix(
   canvassers: Canvasser[],
-  geocodedAddresses: CanvassAddress[],
+  stops: CanvassStop[],
   bases: SalesBase[]
 ): CanvassLocationMatrix {
   const locations: { lat: number; lng: number }[] = [];
@@ -129,12 +164,12 @@ export function buildCanvassLocationMatrix(
     canvasserEndIndices.push(addLoc(e.lat, e.lng));
   }
 
-  const addressIndices: number[] = [];
-  for (const addr of geocodedAddresses) {
-    addressIndices.push(addLoc(addr.lat!, addr.lng!));
+  const stopIndices: number[] = [];
+  for (const stop of stops) {
+    stopIndices.push(addLoc(stop.lat, stop.lng));
   }
 
-  return { locations, canvasserStartIndices, canvasserEndIndices, addressIndices };
+  return { locations, canvasserStartIndices, canvasserEndIndices, stopIndices };
 }
 
 // ── Scheduler ─────────────────────────────────────────────────────────────────
@@ -142,32 +177,28 @@ export function buildCanvassLocationMatrix(
 /**
  * Greedy nearest-neighbour multi-day canvass scheduler.
  *
- * For each day, each working canvasser takes addresses from the remaining pool
- * in nearest-first order, stopping when their available time (including the
- * return journey) would be exceeded.
+ * Operates on CanvassStop[] — each stop may represent multiple addresses.
+ * Duration at a stop = durationMinsPerAddress × stop.addressIds.length.
+ * Travel time to the stop is counted once regardless of address count.
  */
 export function scheduleCanvass(
   canvassers: Canvasser[],
-  geocodedAddresses: CanvassAddress[],
+  stops: CanvassStop[],
   startDate: Date,
   bases: SalesBase[],
   travelMatrix: (number | null)[][],
   locMatrix: CanvassLocationMatrix,
   durationMinsPerAddress = 20
 ): CanvassResult {
-  const durationSecs = durationMinsPerAddress * 60;
+  const durationSecsPerAddr = durationMinsPerAddress * 60;
   const MAX_DAYS = 14;
 
-  const remaining = new Set<string>(geocodedAddresses.map((a) => a.id));
+  const remaining = new Set<string>(stops.map((s) => s.id));
 
-  // Build fast lookups
-  const addrById = new Map<string, CanvassAddress>(
-    geocodedAddresses.map((a) => [a.id, a])
-  );
-  const addrLocByAddrId = new Map<string, number>();
-  geocodedAddresses.forEach((a, i) =>
-    addrLocByAddrId.set(a.id, locMatrix.addressIndices[i])
-  );
+  // Fast lookups
+  const stopById = new Map<string, CanvassStop>(stops.map((s) => [s.id, s]));
+  const stopLocById = new Map<string, number>();
+  stops.forEach((s, i) => stopLocById.set(s.id, locMatrix.stopIndices[i]));
 
   const days: DayPlan[] = [];
 
@@ -192,8 +223,6 @@ export function scheduleCanvass(
     const routes: DayPlan["routes"] = [];
     let anyAssigned = false;
 
-    // Snapshot remaining at start of day so canvassers share from the same pool
-    // (each address goes to the first canvasser who claims it)
     for (const { c, i: ci } of workingPairs) {
       const startMins = parseHHMM(c.startTime);
       const endMins   = parseHHMM(c.endTime);
@@ -204,53 +233,47 @@ export function scheduleCanvass(
       const endLocIdx   = locMatrix.canvasserEndIndices[ci];
       let usedSecs = 0;
 
-      const assignedIds: string[] = [];
-      const assignedTravelSecs: number[] = [];
+      const assignedStops: DayPlan["routes"][0]["stops"] = [];
 
-      // Collect remaining pool as array for iteration
-      const pool = [...remaining].map((id) => addrById.get(id)!).filter(Boolean);
+      // Working pool for this canvasser's turn
+      const pool = [...remaining].map((id) => stopById.get(id)!).filter(Boolean);
 
       while (pool.length > 0) {
-        // Find nearest address in remaining pool from current location
+        // Find nearest stop in remaining pool
         let bestId: string | null = null;
         let bestTravel = Infinity;
         let bestLocIdx = -1;
 
-        for (const addr of pool) {
-          const locIdx = addrLocByAddrId.get(addr.id)!;
+        for (const stop of pool) {
+          const locIdx = stopLocById.get(stop.id)!;
           const travel = travelMatrix[currentLocIdx]?.[locIdx] ?? Infinity;
           if (travel < bestTravel) {
             bestTravel = travel;
-            bestId = addr.id;
+            bestId = stop.id;
             bestLocIdx = locIdx;
           }
         }
 
         if (bestId === null || bestTravel === Infinity) break;
 
-        // Check we can visit and still return to end location in time
-        const returnTravel = travelMatrix[bestLocIdx]?.[endLocIdx] ?? 0;
-        if (usedSecs + bestTravel + durationSecs + returnTravel > availableSecs) break;
+        const stop = stopById.get(bestId)!;
+        const stopDuration = durationSecsPerAddr * stop.addressIds.length;
 
-        // Claim address
-        assignedIds.push(bestId);
-        assignedTravelSecs.push(bestTravel);
-        usedSecs += bestTravel + durationSecs;
+        // Check we can visit this stop and still return to end in time
+        const returnTravel = travelMatrix[bestLocIdx]?.[endLocIdx] ?? 0;
+        if (usedSecs + bestTravel + stopDuration + returnTravel > availableSecs) break;
+
+        // Claim stop
+        assignedStops.push({ addressIds: stop.addressIds, travelSec: bestTravel });
+        usedSecs += bestTravel + stopDuration;
         currentLocIdx = bestLocIdx;
         remaining.delete(bestId);
-        pool.splice(
-          pool.findIndex((a) => a.id === bestId),
-          1
-        );
+        pool.splice(pool.findIndex((s) => s.id === bestId), 1);
         anyAssigned = true;
       }
 
-      if (assignedIds.length > 0) {
-        routes.push({
-          canvasserId: c.id,
-          addressIds: assignedIds,
-          travelSecs: assignedTravelSecs,
-        });
+      if (assignedStops.length > 0) {
+        routes.push({ canvasserId: c.id, stops: assignedStops });
       }
     }
 
@@ -258,9 +281,13 @@ export function scheduleCanvass(
       days.push({ date: dateStr, routes });
     }
 
-    // If working canvassers couldn't assign anything, remaining pool is unreachable
     if (!anyAssigned && workingPairs.length > 0) break;
   }
 
-  return { days, unassigned: [...remaining] };
+  // Expand unassigned stops back to individual address IDs
+  const unassigned = [...remaining].flatMap(
+    (id) => stopById.get(id)?.addressIds ?? [id]
+  );
+
+  return { days, unassigned };
 }
