@@ -342,9 +342,10 @@ function SortableCanvasserCard({
               <option value="home">{canvasser.homeAddress || "Home"}</option>
               {bases.map((b) => <option key={b.id} value={b.id}>{b.name} base</option>)}
             </select>
-            {!canvasser.homeLat && (
-              <p className="text-xs text-amber-600 mt-0.5">⚠ Address not geocoded</p>
-            )}
+            {canvasser.homeLat && canvasser.homeLng
+              ? <p className="text-xs text-green-600 mt-0.5">✓ Geocoded: {canvasser.homeLat.toFixed(4)}, {canvasser.homeLng.toFixed(4)}</p>
+              : <p className="text-xs text-amber-600 mt-0.5">⚠ Address not geocoded</p>
+            }
             <div className="flex gap-1.5 mt-1 items-center text-xs text-coal/50">
               {/* Inline time fields */}
               <input
@@ -740,7 +741,6 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
   }, []);
 
   const [addressInput, setAddressInput] = useState("");
-  const [activeTab, setActiveTab] = useState<"paste" | "csv">("paste");
   const [startDate, setStartDate] = useState(todayISO());
   const [durationMins, setDurationMins] = useState(20);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -780,7 +780,6 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
         if (val) addrs.push(val);
       }
       setAddressInput(addrs.join("\n"));
-      setActiveTab("paste");
     };
     reader.readAsText(file);
     e.target.value = "";
@@ -991,133 +990,73 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
 
   return (
     <div className="p-5 lg:p-6 space-y-5">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-coal/50 flex-shrink-0">
-            <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          <span className="text-xs font-semibold uppercase tracking-widest text-coal/60">
-            {workingCanvassers.length} canvasser{workingCanvassers.length === 1 ? "" : "s"} working
-          </span>
+      {/* Toolbar — mirrors appointments: settings left, manage button right */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-coal/50 flex-shrink-0"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <span className="text-xs font-semibold uppercase tracking-widest text-coal/60">Duration</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={3}
+            value={durationMins}
+            onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) setDurationMins(v); }}
+            className="w-14 px-2 py-1 text-sm text-coal bg-snow border border-loch/10 rounded-lg outline-none focus:ring-2 focus:ring-loch/20 text-center"
+            aria-label="Minutes per door"
+          />
+          <span className="text-xs text-coal/50">mins</span>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="px-2 py-1 text-sm text-coal bg-snow border border-loch/10 rounded-lg outline-none focus:ring-2 focus:ring-loch/20 transition-all"
+            aria-label="Start date"
+          />
         </div>
         <button
           onClick={() => setShowManager(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-snow border border-loch/15 text-loch/80 hover:text-loch hover:border-loch/30 transition-colors"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-saltire border border-saltire/25 rounded-lg hover:bg-snow transition-colors flex-shrink-0"
         >
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.4"/><path d="M1 13.5c0-2.485 2.239-4.5 5-4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M11 9v4M9 11h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
           Manage Canvassers
+          {canvassers.filter((c) => c.isWorking).length > 0 && (
+            <span className="ml-0.5 bg-saltire/10 text-saltire text-[10px] font-bold px-1 rounded">
+              {canvassers.filter((c) => c.isWorking).length}
+            </span>
+          )}
+          {saveError && (
+            <span className="ml-0.5 text-red-500" title={`Changes could not be saved: ${saveError}`}>⚠</span>
+          )}
         </button>
       </div>
 
-      {saveError && (
-        <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-100">
-          Save error: {saveError}
-        </p>
-      )}
-
-      {/* Addresses */}
-      <section aria-labelledby="canvass-addresses-label">
-        <div className="mb-3">
-          <h2 id="canvass-addresses-label" className="text-xs font-semibold text-coal/60 uppercase tracking-widest mb-1">
-            Addresses
+      {/* Addresses — blue box matching appointments section style */}
+      <section aria-labelledby="canvass-addresses-label" className="rounded-lg border border-blue-200 bg-blue-50 overflow-hidden">
+        <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-blue-100">
+          <h2 id="canvass-addresses-label" className="text-xs font-semibold text-blue-800 uppercase tracking-wide">
+            Addresses{addressInput.split("\n").filter(Boolean).length > 0 && ` (${addressInput.split("\n").filter(Boolean).length})`}
           </h2>
         </div>
-        {/* Tabs */}
-        <div className="flex gap-1 mb-3" role="tablist">
-          <button
-            role="tab"
-            aria-selected={activeTab === "paste"}
-            onClick={() => setActiveTab("paste")}
-            className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all duration-150 ${
-              activeTab === "paste"
-                ? "bg-loch text-white"
-                : "text-coal/60 border border-gray-200 hover:bg-gray-50"
-            }`}
-          >
-            Paste addresses
-          </button>
-          <button
-            role="tab"
-            aria-selected={activeTab === "csv"}
-            onClick={() => setActiveTab("csv")}
-            className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all duration-150 ${
-              activeTab === "csv"
-                ? "bg-loch text-white"
-                : "text-coal/60 border border-gray-200 hover:bg-gray-50"
-            }`}
-          >
-            Upload CSV
-          </button>
-        </div>
-
-        {activeTab === "paste" ? (
-          <>
-            <textarea
-              value={addressInput}
-              onChange={(e) => setAddressInput(e.target.value)}
-              placeholder={"12 Union Street, Aberdeen, AB10 1AA\n45 Byres Road, Glasgow, G11 5RG\n7 Rose Street, Edinburgh, EH2 2PR"}
-              rows={7}
-              className="w-full px-3.5 py-2.5 text-sm text-coal placeholder-coal/40 bg-snow border border-loch/10 rounded-lg outline-none focus:ring-2 focus:ring-loch/20 focus:border-loch/30 transition-all duration-150 resize-none font-sans"
-            />
-            <p className="mt-1.5 text-xs text-coal/50">One address per line, including postcode</p>
-          </>
-        ) : (
-          <>
+        <div className="px-3.5 py-2.5">
+          <textarea
+            value={addressInput}
+            onChange={(e) => setAddressInput(e.target.value)}
+            placeholder={"12 Union Street, Aberdeen, AB10 1AA\n45 Byres Road, Glasgow, G11 5RG\n7 Rose Street, Edinburgh, EH2 2PR"}
+            rows={7}
+            className="w-full px-3 py-2 text-sm text-coal placeholder-coal/40 bg-white border border-blue-100 rounded-lg outline-none focus:ring-2 focus:ring-loch/20 focus:border-loch/30 transition-all duration-150 resize-none font-sans"
+          />
+          <div className="flex gap-2 mt-2">
+            <p className="flex-1 text-xs text-coal/50 self-center">One address per line, including postcode</p>
             <button
               onClick={() => fileRef.current?.click()}
-              className="w-full border-2 border-dashed border-loch/20 rounded-lg py-8 text-center hover:bg-snow/50 transition-colors duration-150 group"
-              aria-label="Choose CSV file to upload"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-coal/60 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              aria-label="Upload CSV"
             >
-              <svg className="w-8 h-8 mx-auto mb-2 text-loch/30 group-hover:text-loch/50 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-              <p className="text-sm font-medium text-loch/70 group-hover:text-loch transition-colors">
-                Drop a CSV or click to browse
-              </p>
-              <p className="text-xs text-coal/60 mt-1">Column named &ldquo;address&rdquo; or first column used</p>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 10V1m0 0L5 4m3-3 3 3M2 12v1a1 1 0 001 1h10a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              CSV
             </button>
             <input ref={fileRef} type="file" accept=".csv" onChange={handleCSV} className="hidden" aria-hidden="true" />
-            {addressInput && (
-              <p className="mt-2 text-xs text-coal/60">
-                {addressInput.split("\n").filter(Boolean).length} addresses loaded
-              </p>
-            )}
-          </>
-        )}
-      </section>
-
-      {/* Date + duration */}
-      <section aria-labelledby="canvass-schedule-label">
-        <h2 id="canvass-schedule-label" className="text-xs font-semibold text-coal/60 uppercase tracking-widest mb-2">
-          Schedule
-        </h2>
-        <div className="flex gap-3 items-center flex-wrap">
-          <div className="flex items-center gap-2">
-            <label htmlFor="canvass-start-date" className="text-xs text-coal/60">Start date</label>
-            <input
-              id="canvass-start-date"
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="px-2.5 py-1.5 text-sm text-coal bg-snow border border-loch/10 rounded-lg outline-none focus:ring-2 focus:ring-loch/20 focus:border-loch/30 transition-all"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <label htmlFor="canvass-duration" className="text-xs text-coal/60">Mins per door</label>
-            <input
-              id="canvass-duration"
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={3}
-              value={durationMins}
-              onChange={(e) => {
-                const v = parseInt(e.target.value);
-                if (!isNaN(v) && v > 0) setDurationMins(v);
-              }}
-              className="w-14 px-2.5 py-1.5 text-sm text-coal bg-snow border border-loch/10 rounded-lg outline-none focus:ring-2 focus:ring-loch/20 text-center"
-            />
           </div>
         </div>
       </section>

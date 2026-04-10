@@ -540,7 +540,10 @@ function SortableRepCard({
               <option value="home">{rep.homeAddress || "Home"}</option>
               {bases.map(b => <option key={b.id} value={b.id}>{b.name} base</option>)}
             </select>
-            {!rep.homeLat && <p className="text-xs text-amber-600 mt-0.5">⚠ Address not geocoded</p>}
+            {rep.homeLat && rep.homeLng
+              ? <p className="text-xs text-green-600 mt-0.5">✓ Geocoded: {rep.homeLat.toFixed(4)}, {rep.homeLng.toFixed(4)}</p>
+              : <p className="text-xs text-amber-600 mt-0.5">⚠ Address not geocoded</p>
+            }
             <div className="flex gap-1.5 mt-1 flex-wrap items-center text-xs text-coal/50">
               {/* Inline time range — auto-inserts colon after 2 digits */}
               <input
