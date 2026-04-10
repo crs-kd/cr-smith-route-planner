@@ -1553,7 +1553,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                 className={`border rounded-lg overflow-hidden transition-all ${hasConflict ? "border-amber-200" : "border-gray-200"} ${flashRepId === schedule.repId ? "ring-2 ring-loch ring-offset-1" : ""}`}>
                 <button onClick={() => handleToggleRep(schedule.repId)}
                   className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${isExpanded ? "bg-snow" : "hover:bg-gray-50"}`}>
-                  <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold ${hasConflict ? "bg-amber-500" : "bg-loch"}`}>
+                  <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold ${hasConflict ? "bg-rose-500" : "bg-loch"}`}>
                     {rep.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1565,10 +1565,10 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                   </div>
                   <div className="flex items-center gap-1">
                     {hasLongTravel && (
-                      <span className="text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">+2h travel</span>
+                      <span className="text-xs font-medium text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">+2h travel</span>
                     )}
                     {hasConflict && (
-                      <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">Conflict</span>
+                      <span className="text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">Conflict</span>
                     )}
                   </div>
                   <svg className={`w-4 h-4 text-coal/40 transition-transform ${isExpanded ? "rotate-180" : ""}`}
