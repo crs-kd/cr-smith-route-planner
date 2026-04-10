@@ -62,15 +62,14 @@ const WEEKDAYS = [1, 2, 3, 4, 5]; // Mon–Fri defaults
 
 async function geocodeOne(address: string): Promise<{ lat: number; lng: number } | null> {
   try {
-    const res = await fetch("/api/geocode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ anchor: address, addresses: [] }),
-    });
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=gb`,
+      { headers: { "User-Agent": "CRSmith-RoutePlanner/1.0" } }
+    );
     if (!res.ok) return null;
-    const data = await res.json() as { geocoded: Array<{ isAnchor?: boolean; lat: number; lng: number }> };
-    const anchor = data.geocoded.find((g) => g.isAnchor);
-    return anchor ?? null;
+    const results = await res.json() as Array<{ lat: string; lon: string }>;
+    if (!results[0]) return null;
+    return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) };
   } catch { return null; }
 }
 
