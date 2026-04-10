@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   DndContext,
   closestCenter,
@@ -611,12 +612,16 @@ function CanvasserManager({
 
 function DayCard({
   dayPlan, canvassers, addresses, expandedCanvasserId, onToggleCanvasser,
+  durationMins, exportedKeys, onToggleExport,
 }: {
   dayPlan: DayPlan;
   canvassers: Canvasser[];
   addresses: CanvassAddress[];
   expandedCanvasserId: string | null;
   onToggleCanvasser: (canvasserId: string, dayDate: string) => void;
+  durationMins: number;
+  exportedKeys: Set<string>;
+  onToggleExport: (key: string) => void;
 }) {
   const addrById = new Map(addresses.map((a) => [a.id, a]));
   const totalAddresses = dayPlan.routes.reduce(
@@ -644,68 +649,86 @@ function DayCard({
         {dayPlan.routes.map((route) => {
           const canvasser = canvassers.find((c) => c.id === route.canvasserId);
           if (!canvasser) return null;
-          const isExpanded = expandedCanvasserId === `${route.canvasserId}:${dayPlan.date}`;
+          const key = `${route.canvasserId}:${dayPlan.date}`;
+          const isExpanded = expandedCanvasserId === key;
+          const isExported = exportedKeys.has(key);
           const totalTravelSec = route.stops.reduce((s, st) => s + st.travelSec, 0);
           const totalRouteAddresses = route.stops.reduce((n, s) => n + s.addressIds.length, 0);
 
           return (
             <div key={route.canvasserId} className="bg-white">
-              <button
-                onClick={() => onToggleCanvasser(route.canvasserId, dayPlan.date)}
-                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-snow/60 transition-colors"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-coal">{canvasser.name}</p>
-                  <p className="text-xs text-coal/50 mt-0.5">
-                    {totalRouteAddresses} address{totalRouteAddresses === 1 ? "" : "es"}
-                    {route.stops.length < totalRouteAddresses && (
-                      <> · {route.stops.length} stop{route.stops.length === 1 ? "" : "s"}</>
-                    )}
-                    {totalTravelSec > 0 && (
-                      <> · ~{formatDurationSec(totalTravelSec)} drive</>
-                    )}
-                  </p>
-                </div>
-                <svg
-                  className={`w-4 h-4 text-coal/40 transition-transform duration-150 flex-shrink-0 ${isExpanded ? "rotate-180" : ""}`}
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor"
+              <div className={`flex items-center gap-3 px-4 py-3 ${isExpanded ? "bg-snow" : ""}`}>
+                {/* Export toggle */}
+                <button
+                  onClick={() => onToggleExport(key)}
+                  title={isExported ? "Exclude from export" : "Include in export"}
+                  className="flex-shrink-0 p-0.5 rounded transition-colors hover:bg-gray-100"
+                  aria-label={isExported ? "Exclude from export" : "Include in export"}
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className={isExported ? "text-saltire" : "text-coal/20"}>
+                    <polyline points="6 9 6 2 18 2 18 9"/>
+                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                    <rect x="6" y="14" width="12" height="8"/>
+                  </svg>
+                </button>
+                <button
+                  onClick={() => onToggleCanvasser(route.canvasserId, dayPlan.date)}
+                  className="flex-1 flex items-center gap-3 text-left hover:opacity-80 transition-opacity"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-coal">{canvasser.name}</p>
+                    <p className="text-xs text-coal/50 mt-0.5">
+                      {totalRouteAddresses} address{totalRouteAddresses === 1 ? "" : "es"}
+                      {route.stops.length < totalRouteAddresses && (
+                        <> · {route.stops.length} stop{route.stops.length === 1 ? "" : "s"}</>
+                      )}
+                      {totalTravelSec > 0 && (
+                        <> · ~{formatDurationSec(totalTravelSec)} drive</>
+                      )}
+                    </p>
+                  </div>
+                  <svg
+                    className={`w-4 h-4 text-coal/40 transition-transform duration-150 flex-shrink-0 ${isExpanded ? "rotate-180" : ""}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
 
               {isExpanded && (
-                <div className="border-t border-gray-100 px-4 pb-3">
-                  <ol className="space-y-2 mt-2">
+                <div className="border-t border-gray-100">
+                  <ol aria-label={`Route for ${canvasser.name}`}>
                     {route.stops.map((stop, idx) => {
                       const stopAddresses = stop.addressIds
                         .map((id) => addrById.get(id))
                         .filter(Boolean) as CanvassAddress[];
                       const isMulti = stopAddresses.length > 1;
+                      const doorMins = durationMins * stop.addressIds.length;
                       return (
-                        <li key={stop.addressIds[0]} className="flex gap-2 text-xs">
-                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-loch/10 text-loch font-semibold flex items-center justify-center text-[10px] mt-0.5">
+                        <li key={stop.addressIds[0]} className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-b-0">
+                          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-loch/10 text-loch font-semibold flex items-center justify-center text-xs mt-0.5">
                             {idx + 1}
                           </span>
                           <div className="flex-1 min-w-0">
-                            {isMulti ? (
-                              <>
-                                <p className="font-medium text-coal/80">
-                                  {stopAddresses.length} addresses at this location
-                                </p>
-                                <ul className="mt-0.5 space-y-0.5 pl-1">
-                                  {stopAddresses.map((a) => (
-                                    <li key={a.id} className="text-coal/60 truncate before:content-['·'] before:mr-1">
-                                      {a.address}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </>
-                            ) : (
-                              <p className="text-coal/80 truncate">{stopAddresses[0]?.address ?? stop.addressIds[0]}</p>
+                            <p className="text-xs font-semibold text-loch uppercase tracking-wide">
+                              {doorMins} min{doorMins === 1 ? "" : "s"} at door
+                            </p>
+                            <p className="text-sm font-semibold text-coal mt-0.5">
+                              {isMulti
+                                ? `${stopAddresses.length} addresses at this location`
+                                : (stopAddresses[0]?.address ?? stop.addressIds[0])}
+                            </p>
+                            {isMulti && (
+                              <ul className="mt-1 space-y-0.5">
+                                {stopAddresses.map((a) => (
+                                  <li key={a.id} className="text-xs text-coal/50 truncate">{a.address}</li>
+                                ))}
+                              </ul>
                             )}
                             {idx > 0 && stop.travelSec > 0 && (
-                              <p className="text-coal/40 mt-0.5">{formatDurationSec(stop.travelSec)} from previous</p>
+                              <p className="text-xs text-coal/40 mt-1">{formatDurationSec(stop.travelSec)} travel from previous stop</p>
                             )}
                           </div>
                         </li>
@@ -769,6 +792,7 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
   const [canvassResult, setCanvassResult] = useState<CanvassResult | null>(null);
   const [geocodedAddresses, setGeocodedAddresses] = useState<CanvassAddress[]>([]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [exportedKeys, setExportedKeys] = useState<Set<string>>(new Set());
   const [showManager, setShowManager] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -909,6 +933,9 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
       durationMins
     );
     setCanvassResult(result);
+    setExportedKeys(new Set(
+      result.days.flatMap((d) => d.routes.map((r) => `${r.canvasserId}:${d.date}`))
+    ));
 
     const totalAssigned = geocoded.length - result.unassigned.length;
     void grouped; // used implicitly via stops.length in status message
@@ -926,6 +953,7 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
     setCanvassResult(null);
     setGeocodedAddresses([]);
     setExpandedKey(null);
+    setExportedKeys(new Set());
     setPhase("idle");
     setStatusMsg("");
     onRoutePreview(null);
@@ -1158,11 +1186,39 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
       {/* Results */}
       {canvassResult && canvassResult.days.length > 0 && (
         <div className="space-y-4 pt-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-coal/60 uppercase tracking-widest">
-              Canvass Plan
-            </h3>
-            <p className="text-xs text-coal/40">Click a canvasser to see their route on the map</p>
+          {/* Heading row with export controls */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-xs font-semibold text-coal/60 uppercase tracking-widest flex-shrink-0">Canvass Plan</h3>
+            <div className="flex-1" />
+            <p className="text-xs text-coal/40">Click canvasser to view route</p>
+            {/* Select / deselect all */}
+            {(() => {
+              const allKeys = canvassResult.days.flatMap((d) => d.routes.map((r) => `${r.canvasserId}:${d.date}`));
+              const allExported = allKeys.every((k) => exportedKeys.has(k));
+              return (
+                <button
+                  onClick={() => setExportedKeys(allExported ? new Set() : new Set(allKeys))}
+                  title={allExported ? "Deselect all" : "Select all for export"}
+                  className="p-1 rounded transition-colors hover:bg-gray-50"
+                  aria-label={allExported ? "Deselect all from export" : "Select all for export"}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className={allExported ? "text-saltire" : "text-coal/30"}>
+                    <polyline points="6 9 6 2 18 2 18 9"/>
+                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                    <rect x="6" y="14" width="12" height="8"/>
+                  </svg>
+                </button>
+              );
+            })()}
+            {/* Export button */}
+            <button
+              onClick={() => window.print()}
+              className="text-[11px] font-medium px-2 py-1 rounded-md border border-gray-200 text-coal/50 hover:text-coal hover:bg-gray-50 transition-colors flex items-center gap-1"
+            >
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 10v3a1 1 0 001 1h8a1 1 0 001-1v-3M8 2v8m0 0L5 7m3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Export
+            </button>
           </div>
 
           {canvassResult.days.map((dayPlan) => (
@@ -1173,6 +1229,13 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
               addresses={geocodedAddresses}
               expandedCanvasserId={expandedKey}
               onToggleCanvasser={handleToggleCanvasser}
+              durationMins={durationMins}
+              exportedKeys={exportedKeys}
+              onToggleExport={(k) => setExportedKeys((prev) => {
+                const next = new Set(prev);
+                if (next.has(k)) next.delete(k); else next.add(k);
+                return next;
+              })}
             />
           ))}
 
@@ -1191,6 +1254,60 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
                 These addresses couldn&apos;t be fit within {14} days. Try adding more canvassers or extending working hours.
               </p>
             </div>
+          )}
+
+          {/* Print portal */}
+          {typeof document !== "undefined" && createPortal(
+            <div id="print-portal" style={{ display: "none" }}>
+              <style>{`@media print { body > *:not(#print-portal) { display: none !important; } #print-portal { display: block !important; } }`}</style>
+              {canvassResult.days.flatMap((dayPlan) => {
+                const dateObj = new Date(dayPlan.date + "T12:00:00");
+                const dateLabel = dateObj.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+                const addrById = new Map(geocodedAddresses.map((a) => [a.id, a]));
+                return dayPlan.routes
+                  .filter((r) => exportedKeys.has(`${r.canvasserId}:${dayPlan.date}`))
+                  .map((route) => {
+                    const canvasser = canvassers.find((c) => c.id === route.canvasserId);
+                    if (!canvasser) return null;
+                    return (
+                      <div key={`${route.canvasserId}:${dayPlan.date}`} style={{ pageBreakAfter: "always", padding: "2rem", fontFamily: "sans-serif" }}>
+                        <h1 style={{ fontSize: "1.5rem", fontWeight: "bold", marginBottom: "0.25rem" }}>{canvasser.name}</h1>
+                        <p style={{ fontSize: "0.875rem", color: "#6b7280", marginBottom: "1.5rem" }}>{dateLabel}</p>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
+                          <thead>
+                            <tr style={{ borderBottom: "2px solid #d1d5db" }}>
+                              <th style={{ textAlign: "left", padding: "0.5rem 1rem 0.5rem 0" }}>#</th>
+                              <th style={{ textAlign: "left", padding: "0.5rem 1rem 0.5rem 0" }}>Address</th>
+                              <th style={{ textAlign: "left", padding: "0.5rem 1rem 0.5rem 0" }}>Door time</th>
+                              <th style={{ textAlign: "left", padding: "0.5rem 0" }}>Travel</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {route.stops.map((stop, idx) => {
+                              const stopAddresses = stop.addressIds
+                                .map((id) => addrById.get(id))
+                                .filter(Boolean) as CanvassAddress[];
+                              const doorMins = durationMins * stop.addressIds.length;
+                              const addressCell = stopAddresses.length > 1
+                                ? stopAddresses.map((a) => a.address).join("; ")
+                                : (stopAddresses[0]?.address ?? stop.addressIds[0]);
+                              return (
+                                <tr key={stop.addressIds[0]} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                                  <td style={{ padding: "0.5rem 1rem 0.5rem 0", color: "#6b7280" }}>{idx + 1}</td>
+                                  <td style={{ padding: "0.5rem 1rem 0.5rem 0" }}>{addressCell}</td>
+                                  <td style={{ padding: "0.5rem 1rem 0.5rem 0" }}>{doorMins} min{doorMins === 1 ? "" : "s"}</td>
+                                  <td style={{ padding: "0.5rem 0", color: "#6b7280" }}>{idx > 0 && stop.travelSec > 0 ? formatDurationSec(stop.travelSec) : "—"}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  });
+              })}
+            </div>,
+            document.body
           )}
         </div>
       )}

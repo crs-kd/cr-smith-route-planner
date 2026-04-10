@@ -348,6 +348,9 @@ function RepEditForm({
     <div className="p-3 space-y-2.5 bg-snow/50">
       <input className={inputCls} placeholder="Full name" value={form.name ?? ""} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
       <input className={inputCls} placeholder="Home address / postcode" value={form.homeAddress ?? ""} onChange={(e) => setForm((f) => ({ ...f, homeAddress: e.target.value }))} />
+      {form.homeLat && form.homeLng && (
+        <p className="text-xs text-green-600">✓ Geocoded: {form.homeLat.toFixed(4)}, {form.homeLng.toFixed(4)}</p>
+      )}
       <div className="grid grid-cols-3 gap-2">
         <div>
           <p className="text-xs text-coal/50 mb-1">Start time</p>
