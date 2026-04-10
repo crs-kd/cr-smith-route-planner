@@ -1018,6 +1018,14 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
   const [geocodedAppts, setGeocodedAppts] = useState<ApptInput[]>([]);
   const [geocodeFailedAddresses, setGeocodeFailedAddresses] = useState<Set<string>>(new Set());
   const [expandedRepId, setExpandedRepId] = useState<string | null>(null);
+  const [flashRepId, setFlashRepId] = useState<string | null>(null);
+
+  const repForAppt = new Map<string, string>();
+  if (scheduleResult) {
+    for (const s of scheduleResult.schedules) {
+      for (const a of s.assignments) repForAppt.set(a.apptId, s.repId);
+    }
+  }
 
   const fileRef = useRef<HTMLInputElement>(null);
   const isLoading = ["geocoding", "matrix", "scheduling"].includes(phase);
@@ -1215,6 +1223,17 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
     setScheduleResult(recalculated);
   }
 
+  function jumpToRep(apptId: string) {
+    const repId = repForAppt.get(apptId);
+    if (!repId) return;
+    if (expandedRepId !== repId) handleToggleRep(repId);
+    setFlashRepId(repId);
+    setTimeout(() => setFlashRepId(null), 1200);
+    setTimeout(() => {
+      document.querySelector(`[data-rep-id="${repId}"]`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 50);
+  }
+
   async function handleToggleRep(repId: string) {
     const next = expandedRepId === repId ? null : repId;
     setExpandedRepId(next);
@@ -1346,9 +1365,21 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                       return (
                         <tr key={appt.id} className={`border-b border-snow last:border-b-0 ${isFailed ? "bg-amber-50" : ""}`}>
                           <td className="px-2 py-1.5">
-                            <input value={appt.urn ?? ""} onChange={(e) => updateAppt(appt.id, "urn", e.target.value)}
-                              placeholder="URN"
-                              className="w-full text-xs font-mono text-coal bg-transparent outline-none placeholder-coal/30 focus:bg-white rounded px-0.5 transition-colors" />
+                            <div className="flex items-center gap-1">
+                              <input value={appt.urn ?? ""} onChange={(e) => updateAppt(appt.id, "urn", e.target.value)}
+                                placeholder="URN"
+                                className="w-full text-xs font-mono text-coal bg-transparent outline-none placeholder-coal/30 focus:bg-white rounded px-0.5 transition-colors" />
+                              {repForAppt.has(appt.id) && (
+                                <button
+                                  onClick={() => jumpToRep(appt.id)}
+                                  title="Jump to assigned rep"
+                                  className="flex-shrink-0 p-0.5 text-loch/40 hover:text-loch transition-colors"
+                                  aria-label="Jump to assigned rep"
+                                >
+                                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M8 3l5 5-5 5M3 8h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                </button>
+                              )}
+                            </div>
                           </td>
                           <td className="px-2 py-1.5">
                             <div className="flex items-center gap-1">
@@ -1519,7 +1550,8 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
 
             return (
               <div key={schedule.repId}
-                className={`border rounded-lg overflow-hidden transition-all ${hasConflict ? "border-amber-200" : "border-gray-200"}`}>
+                data-rep-id={schedule.repId}
+                className={`border rounded-lg overflow-hidden transition-all ${hasConflict ? "border-amber-200" : "border-gray-200"} ${flashRepId === schedule.repId ? "ring-2 ring-loch ring-offset-1" : ""}`}>
                 <button onClick={() => handleToggleRep(schedule.repId)}
                   className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${isExpanded ? "bg-snow" : "hover:bg-gray-50"}`}>
                   <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold ${hasConflict ? "bg-amber-500" : "bg-loch"}`}>
