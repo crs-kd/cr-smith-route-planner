@@ -1061,6 +1061,9 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
   const [geocodeFailedAddresses, setGeocodeFailedAddresses] = useState<Set<string>>(new Set());
   const [expandedRepId, setExpandedRepId] = useState<string | null>(null);
   const [flashRepId, setFlashRepId] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"name" | "appointments" | "travel">("name");
+  const [groupByArea, setGroupByArea] = useState(false);
+  const [exportedRepIds, setExportedRepIds] = useState<Set<string>>(new Set());
 
   const repForAppt = new Map<string, string>();
   if (scheduleResult) {
@@ -1206,6 +1209,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
     setStatusMsg("Scheduling appointments…");
     const result = scheduleAppointments(reps, geocodedOk, durationHours, matrix, lm, bases);
     setScheduleResult(result);
+    setExportedRepIds(new Set(result.schedules.map(s => s.repId)));
 
     const totalAssigned = result.schedules.reduce((n, s) => n + s.assignments.length, 0);
     const failNote = failedSet.size > 0 ? ` · ${failedSet.size} address${failedSet.size === 1 ? "" : "es"} couldn't be geocoded` : "";
@@ -1379,6 +1383,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
 
   return (
   <CustomTagsContext.Provider value={customTags}>
+    <style>{`@media print { body > * { display: none !important; } #__next > * { display: none !important; } .print\\:block { display: block !important; } }`}</style>
     <div className="p-5 lg:p-6 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-4">
@@ -1615,23 +1620,65 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
       </div>
 
       {/* Results */}
-      {scheduleResult && scheduleResult.schedules.length > 0 && (
-        <div className="space-y-2 pt-1 animate-fadeIn">
-          <h3 className="text-xs font-semibold text-coal/60 uppercase tracking-widest">Scheduled Routes</h3>
+      {scheduleResult && scheduleResult.schedules.length > 0 && (() => {
+        // Sort
+        const sorted = [...scheduleResult.schedules].sort((a, b) => {
+          if (sortBy === "appointments") return b.assignments.length - a.assignments.length;
+          if (sortBy === "travel") {
+            const tA = a.assignments.reduce((s, x) => s + x.travelSec, 0);
+            const tB = b.assignments.reduce((s, x) => s + x.travelSec, 0);
+            return tB - tA;
+          }
+          const rA = reps.find(r => r.id === a.repId)?.name ?? "";
+          const rB = reps.find(r => r.id === b.repId)?.name ?? "";
+          return rA.localeCompare(rB);
+        });
 
-          {scheduleResult.schedules.map((schedule) => {
-            const rep = reps.find((r) => r.id === schedule.repId);
-            if (!rep) return null;
-            const isExpanded   = expandedRepId === schedule.repId;
-            const hasConflict  = schedule.assignments.some((a) => a.status !== "ok");
-            const hasLongTravel = schedule.assignments.some((a) => a.travelSec > 7200);
+        // Group by area if toggled
+        type Group = { label: string; schedules: typeof sorted };
+        let groups: Group[];
+        if (groupByArea) {
+          const areaMap = new Map<string, Group>();
+          for (const s of sorted) {
+            const rep = reps.find(r => r.id === s.repId);
+            const areaId = rep ? getRepBaseId(rep, bases) : "unassigned";
+            const areaLabel = bases.find(b => b.id === areaId)?.name ?? "Unassigned";
+            if (!areaMap.has(areaId)) areaMap.set(areaId, { label: areaLabel, schedules: [] });
+            areaMap.get(areaId)!.schedules.push(s);
+          }
+          groups = [...areaMap.values()];
+        } else {
+          groups = [{ label: "", schedules: sorted }];
+        }
 
-            return (
-              <div key={schedule.repId}
-                data-rep-id={schedule.repId}
-                className={`border rounded-lg overflow-hidden transition-all ${hasConflict ? "border-amber-200" : "border-gray-200"} ${flashRepId === schedule.repId ? "ring-2 ring-loch ring-offset-1" : ""}`}>
+        const renderCard = (schedule: typeof sorted[number]) => {
+          const rep = reps.find((r) => r.id === schedule.repId);
+          if (!rep) return null;
+          const isExpanded    = expandedRepId === schedule.repId;
+          const hasConflict   = schedule.assignments.some((a) => a.status !== "ok");
+          const hasLongTravel = schedule.assignments.some((a) => a.travelSec > 7200);
+          const isExported    = exportedRepIds.has(schedule.repId);
+
+          return (
+            <div key={schedule.repId}
+              data-rep-id={schedule.repId}
+              className={`border rounded-lg overflow-hidden transition-all ${hasConflict ? "border-rose-200" : "border-gray-200"} ${flashRepId === schedule.repId ? "ring-2 ring-loch ring-offset-1" : ""}`}>
+              <div className={`flex items-center gap-3 px-4 py-3 ${isExpanded ? "bg-snow" : ""}`}>
+                {/* Export toggle */}
+                <button
+                  onClick={() => setExportedRepIds(prev => {
+                    const next = new Set(prev);
+                    if (next.has(schedule.repId)) next.delete(schedule.repId); else next.add(schedule.repId);
+                    return next;
+                  })}
+                  title={isExported ? "Exclude from export" : "Include in export"}
+                  className={`flex-shrink-0 w-4 h-4 rounded border transition-colors ${isExported ? "bg-loch border-loch" : "border-gray-300 bg-white hover:border-loch/50"}`}
+                  aria-label={isExported ? "Exclude from export" : "Include in export"}
+                >
+                  {isExported && <svg viewBox="0 0 16 16" fill="none" className="w-full h-full text-white"><path d="M3 8l3.5 3.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </button>
                 <button onClick={() => handleToggleRep(schedule.repId)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${isExpanded ? "bg-snow" : "hover:bg-gray-50"}`}>
+                  className={`flex-1 flex items-center gap-3 text-left transition-colors ${!isExpanded ? "hover:opacity-80" : ""}`}>
                   <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold ${hasConflict ? "bg-rose-500" : "bg-loch"}`}>
                     {rep.name.charAt(0).toUpperCase()}
                   </div>
@@ -1643,33 +1690,124 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
-                    {hasLongTravel && (
-                      <span className="text-xs font-medium text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">+2h travel</span>
-                    )}
-                    {hasConflict && (
-                      <span className="text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">Conflict</span>
-                    )}
+                    {hasLongTravel && <span className="text-xs font-medium text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">+2h travel</span>}
+                    {hasConflict && <span className="text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">Conflict</span>}
                   </div>
                   <svg className={`w-4 h-4 text-coal/40 transition-transform ${isExpanded ? "rotate-180" : ""}`}
                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
                   </svg>
                 </button>
-
-                {isExpanded && (
-                  <div className="border-t border-gray-100">
-                    <RepRouteList
-                      schedule={schedule} rep={rep}
-                      geocodedAppts={geocodedAppts} durationHours={durationHours}
-                      workingReps={workingReps} bases={bases} onReassign={reassignAppt}
-                    />
-                  </div>
-                )}
               </div>
-            );
-          })}
-        </div>
-      )}
+              {isExpanded && (
+                <div className="border-t border-gray-100">
+                  <RepRouteList
+                    schedule={schedule} rep={rep}
+                    geocodedAppts={geocodedAppts} durationHours={durationHours}
+                    workingReps={workingReps} bases={bases} onReassign={reassignAppt}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        return (
+          <div className="space-y-2 pt-1 animate-fadeIn">
+            {/* Heading row with sort controls and export */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-xs font-semibold text-coal/60 uppercase tracking-widest flex-shrink-0">Scheduled Routes</h3>
+              <div className="flex-1" />
+              {/* Sort segmented control */}
+              <div className="flex rounded-md border border-gray-200 overflow-hidden text-[11px] font-medium">
+                {(["name", "appointments", "travel"] as const).map(opt => (
+                  <button key={opt} onClick={() => setSortBy(opt)}
+                    className={`px-2 py-1 transition-colors ${sortBy === opt ? "bg-loch text-white" : "text-coal/50 hover:text-coal hover:bg-gray-50"}`}>
+                    {opt === "name" ? "A–Z" : opt === "appointments" ? "Appts" : "Travel"}
+                  </button>
+                ))}
+              </div>
+              {/* Group by area toggle */}
+              <button onClick={() => setGroupByArea(g => !g)}
+                className={`text-[11px] font-medium px-2 py-1 rounded-md border transition-colors ${groupByArea ? "bg-loch text-white border-loch" : "text-coal/50 border-gray-200 hover:text-coal hover:bg-gray-50"}`}>
+                Area
+              </button>
+              {/* Export */}
+              <button onClick={() => window.print()}
+                className="text-[11px] font-medium px-2 py-1 rounded-md border border-gray-200 text-coal/50 hover:text-coal hover:bg-gray-50 transition-colors flex items-center gap-1">
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 10v3a1 1 0 001 1h8a1 1 0 001-1v-3M8 2v8m0 0L5 7m3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                Export
+              </button>
+            </div>
+
+            {groups.map(group => (
+              <div key={group.label} className="space-y-2">
+                {groupByArea && <p className="text-[11px] font-semibold text-coal/40 uppercase tracking-widest pt-1">{group.label}</p>}
+                {group.schedules.map(renderCard)}
+              </div>
+            ))}
+
+            {/* Print-only output — hidden on screen, shown when window.print() fires */}
+            <div className="hidden print:block">
+              {scheduleResult.schedules
+                .filter(s => exportedRepIds.has(s.repId))
+                .map(schedule => {
+                  const rep = reps.find(r => r.id === schedule.repId);
+                  if (!rep) return null;
+                  const sortedA = [...schedule.assignments].sort((a, b) => {
+                    const ta = geocodedAppts.find(ap => ap.id === a.apptId);
+                    const tb = geocodedAppts.find(ap => ap.id === b.apptId);
+                    return (ta ? parseHHMM(ta.timeHHMM) : 0) - (tb ? parseHHMM(tb.timeHHMM) : 0);
+                  });
+                  return (
+                    <div key={schedule.repId} style={{ pageBreakAfter: "always" }} className="p-8 font-sans">
+                      <h1 className="text-2xl font-bold mb-1">{rep.name}</h1>
+                      <p className="text-sm text-gray-500 mb-6">{new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b-2 border-gray-300">
+                            <th className="text-left py-2 pr-4">#</th>
+                            <th className="text-left py-2 pr-4">Time</th>
+                            <th className="text-left py-2 pr-4">URN</th>
+                            <th className="text-left py-2 pr-4">Address</th>
+                            <th className="text-left py-2">Travel</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="border-b border-gray-100">
+                            <td className="py-2 pr-4 text-gray-400">S</td>
+                            <td className="py-2 pr-4">{schedule.leaveTimeMins != null ? minsToDisplay(schedule.leaveTimeMins) : "—"}</td>
+                            <td className="py-2 pr-4 text-gray-400" colSpan={2}>Start — {schedule.startAddress}</td>
+                            <td className="py-2" />
+                          </tr>
+                          {sortedA.map((a, idx) => {
+                            const appt = geocodedAppts.find(ap => ap.id === a.apptId);
+                            if (!appt) return null;
+                            return (
+                              <tr key={a.apptId} className="border-b border-gray-100">
+                                <td className="py-2 pr-4">{idx + 1}</td>
+                                <td className="py-2 pr-4 font-mono">{toDisplayTime(appt.timeHHMM)}</td>
+                                <td className="py-2 pr-4 font-mono">{appt.urn ?? "—"}</td>
+                                <td className="py-2 pr-4">{appt.address}</td>
+                                <td className="py-2 text-gray-500">{formatDurationSec(a.travelSec)}</td>
+                              </tr>
+                            );
+                          })}
+                          <tr>
+                            <td className="py-2 pr-4 text-gray-400">E</td>
+                            <td className="py-2 pr-4">{schedule.estimatedReturnTimeMins != null ? minsToDisplay(schedule.estimatedReturnTimeMins) : "—"}</td>
+                            <td className="py-2 pr-4 text-gray-400" colSpan={2}>End — {schedule.endAddress}</td>
+                            <td className="py-2" />
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   </CustomTagsContext.Provider>
   );
