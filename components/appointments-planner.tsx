@@ -1451,7 +1451,7 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
               </button>
               <input ref={fileRef} type="file" accept=".csv" onChange={handleCSV} className="hidden" aria-hidden="true"/>
             </div>
-            <p className="mt-1.5 text-xs text-coal/50">One appointment per line — URN (optional), address, time (HH:MM)</p>
+            <p className="mt-1.5 text-xs text-coal/50">One appointment per line — URN, address, time (HH:MM)</p>
           </div>
         )}
       </section>
