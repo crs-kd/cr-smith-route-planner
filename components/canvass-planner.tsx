@@ -708,28 +708,26 @@ function DayCard({
                       const doorMins = durationMins * stop.addressIds.length;
                       return (
                         <li key={stop.addressIds[0]} className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-b-0">
-                          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-loch/10 text-loch font-semibold flex items-center justify-center text-xs mt-0.5">
+                          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-loch text-white text-xs font-bold flex items-center justify-center mt-0.5">
                             {idx + 1}
                           </span>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-loch uppercase tracking-wide">
-                              {doorMins} min{doorMins === 1 ? "" : "s"} at door
-                            </p>
-                            <p className="text-sm font-semibold text-coal mt-0.5">
+                            {stop.travelSec > 0 && (
+                              <p className="text-xs text-green-600 mb-1">↓ ~{formatDurationSec(stop.travelSec)} travel</p>
+                            )}
+                            <p className="text-sm font-semibold text-coal">
                               {isMulti
                                 ? `${stopAddresses.length} addresses at this location`
                                 : (stopAddresses[0]?.address ?? stop.addressIds[0])}
                             </p>
                             {isMulti && (
-                              <ul className="mt-1 space-y-0.5">
+                              <ul className="mt-0.5 space-y-0">
                                 {stopAddresses.map((a) => (
                                   <li key={a.id} className="text-xs text-coal/50 truncate">{a.address}</li>
                                 ))}
                               </ul>
                             )}
-                            {idx > 0 && stop.travelSec > 0 && (
-                              <p className="text-xs text-coal/40 mt-1">{formatDurationSec(stop.travelSec)} travel from previous stop</p>
-                            )}
+                            <p className="text-xs text-coal/60 mt-0.5">Approx {doorMins} min{doorMins === 1 ? "" : "s"} at door</p>
                           </div>
                         </li>
                       );
