@@ -704,7 +704,6 @@ function DayCard({
                       const stopAddresses = stop.addressIds
                         .map((id) => addrById.get(id))
                         .filter(Boolean) as CanvassAddress[];
-                      const isMulti = stopAddresses.length > 1;
                       const doorMins = durationMins * stop.addressIds.length;
                       return (
                         <li key={stop.addressIds[0]} className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-b-0">
@@ -715,17 +714,14 @@ function DayCard({
                             {stop.travelSec > 0 && (
                               <p className="text-xs text-green-600 mb-1">↓ ~{formatDurationSec(stop.travelSec)} travel</p>
                             )}
-                            <p className="text-sm font-semibold text-coal">
-                              {isMulti
-                                ? `${stopAddresses.length} addresses at this location`
-                                : (stopAddresses[0]?.address ?? stop.addressIds[0])}
-                            </p>
-                            {isMulti && (
-                              <ul className="mt-0.5 space-y-0">
+                            {stopAddresses.length > 0 ? (
+                              <div className="space-y-0.5">
                                 {stopAddresses.map((a) => (
-                                  <li key={a.id} className="text-xs text-coal/50 truncate">{a.address}</li>
+                                  <p key={a.id} className="text-sm font-semibold text-coal">{a.address}</p>
                                 ))}
-                              </ul>
+                              </div>
+                            ) : (
+                              <p className="text-sm font-semibold text-coal">{stop.addressIds[0]}</p>
                             )}
                             <p className="text-xs text-coal/60 mt-0.5">Approx {doorMins} min{doorMins === 1 ? "" : "s"} at door</p>
                           </div>
