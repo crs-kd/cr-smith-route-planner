@@ -55,6 +55,7 @@ interface RoutePreviewData {
 
 interface AppointmentsPlannerProps {
   onRoutePreview: (data: RoutePreviewData | null) => void;
+  onResultReady?: (inputs: Record<string, unknown>, result: Record<string, unknown>) => void;
 }
 
 type Phase = "idle" | "geocoding" | "matrix" | "scheduling" | "done" | "error";
@@ -992,7 +993,7 @@ function RepManager({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlannerProps) {
+export default function AppointmentsPlanner({ onRoutePreview, onResultReady }: AppointmentsPlannerProps) {
   const [reps, setRepsState] = useState<Rep[]>([]);
   const [repSaveError, setRepSaveError] = useState<string | null>(null);
 
@@ -1214,6 +1215,12 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
     const result = scheduleAppointments(reps, geocodedOk, durationHours, matrix, lm, bases);
     setScheduleResult(result);
     setExportedRepIds(new Set(result.schedules.map(s => s.repId)));
+
+    // Notify parent so it can offer Save Plan
+    onResultReady?.(
+      { type: "appointments", appointments: appts, durationHours, activeRepIds: reps.filter(r => r.isWorking).map(r => r.id) } as Record<string, unknown>,
+      { schedules: result.schedules, geocodedAppts: geocodedOk } as unknown as Record<string, unknown>
+    );
 
     const totalAssigned = result.schedules.reduce((n, s) => n + s.assignments.length, 0);
     const failNote = failedSet.size > 0 ? ` · ${failedSet.size} address${failedSet.size === 1 ? "" : "es"} couldn't be geocoded` : "";
@@ -1728,6 +1735,18 @@ export default function AppointmentsPlanner({ onRoutePreview }: AppointmentsPlan
             {/* Heading row with sort controls and export */}
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-xs font-semibold text-coal/60 uppercase tracking-widest flex-shrink-0">Scheduled Routes</h3>
+              {onResultReady && (
+                <button
+                  onClick={() => onResultReady(
+                    { type: "appointments", appointments: appts, durationHours, activeRepIds: reps.filter(r => r.isWorking).map(r => r.id) } as Record<string, unknown>,
+                    { schedules: scheduleResult.schedules, geocodedAppts } as unknown as Record<string, unknown>
+                  )}
+                  className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-loch border border-loch/20 rounded-md hover:bg-loch/5 transition-colors"
+                >
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2M8 2v8m0 0L5 7m3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Save
+                </button>
+              )}
               <div className="flex-1" />
               {/* Sort segmented control */}
               <div className="flex rounded-md border border-gray-200 overflow-hidden text-[11px]">

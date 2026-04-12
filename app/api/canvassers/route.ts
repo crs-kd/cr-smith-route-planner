@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { list, put } from "@vercel/blob";
+import { requireSession } from "@/lib/auth";
+
+export const runtime = "nodejs";
 
 const BLOB_KEY = "cr-smith-canvassers.json";
 
@@ -22,6 +25,8 @@ export async function GET() {
 
 export async function PUT(req: Request) {
   try {
+    const session = await requireSession();
+    if (session.role === "viewer") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     const canvassers = await req.json();
     await put(BLOB_KEY, JSON.stringify(canvassers), {
       access: "private",

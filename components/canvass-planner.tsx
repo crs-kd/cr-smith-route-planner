@@ -41,6 +41,7 @@ interface RoutePreviewData {
 
 interface CanvassPlannerProps {
   onRoutePreview: (data: RoutePreviewData | null) => void;
+  onResultReady?: (inputs: Record<string, unknown>, result: Record<string, unknown>) => void;
 }
 
 type Phase = "idle" | "geocoding" | "matrix" | "scheduling" | "done" | "error";
@@ -741,7 +742,7 @@ function DayCard({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) {
+export default function CanvassPlanner({ onRoutePreview, onResultReady }: CanvassPlannerProps) {
   const [canvassers, setCanvassersState] = useState<Canvasser[]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -930,6 +931,12 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
     setExportedKeys(new Set(
       result.days.flatMap((d) => d.routes.map((r) => `${r.canvasserId}:${d.date}`))
     ));
+
+    // Notify parent so it can offer Save Plan
+    onResultReady?.(
+      { type: "canvass", addresses: rawAddresses, startDate, durationMins, activeCanvasserIds: workingCanvassers.map(c => c.id) } as Record<string, unknown>,
+      { days: result.days, unassigned: result.unassigned, geocodedAddresses: geocoded } as unknown as Record<string, unknown>
+    );
 
     const totalAssigned = geocoded.length - result.unassigned.length;
     void grouped; // used implicitly via stops.length in status message
@@ -1183,6 +1190,20 @@ export default function CanvassPlanner({ onRoutePreview }: CanvassPlannerProps) 
           {/* Heading row with export controls */}
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-xs font-semibold text-coal/60 uppercase tracking-widest flex-shrink-0">Canvass Plan</h3>
+            {onResultReady && (
+              <button
+                onClick={() => {/* parent already has result — trigger save */
+                  onResultReady(
+                    { type: "canvass", addresses: geocodedAddresses.map(a => a.address), startDate, durationMins, activeCanvasserIds: workingCanvassers.map(c => c.id) } as Record<string, unknown>,
+                    { days: canvassResult!.days, unassigned: canvassResult!.unassigned, geocodedAddresses } as unknown as Record<string, unknown>
+                  );
+                }}
+                className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-loch border border-loch/20 rounded-md hover:bg-loch/5 transition-colors"
+              >
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2M8 2v8m0 0L5 7m3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                Save
+              </button>
+            )}
             <div className="flex-1" />
             <p className="text-xs text-coal/40">Click canvasser to view route</p>
             {/* Select / deselect all */}

@@ -4,7 +4,9 @@ import dynamic from "next/dynamic";
 import { useState, useCallback, useLayoutEffect } from "react";
 import AppointmentsPlanner from "./appointments-planner";
 import CanvassPlanner from "./canvass-planner";
+import SavePlanModal from "./save-plan-modal";
 import { useLocalStorage } from "@/lib/use-local-storage";
+import { useSession } from "@/lib/auth-context";
 
 // Dynamic import for Leaflet map — no SSR
 const MapView = dynamic(() => import("./map-view"), {
@@ -27,7 +29,14 @@ interface RoutePreviewData {
 
 type Mode = "canvass" | "appointments";
 
+interface PendingSave {
+  type: "appointments" | "canvass";
+  inputs: Record<string, unknown>;
+  result: Record<string, unknown>;
+}
+
 export default function RoutePlanner() {
+  const { session } = useSession();
   const [mode, setMode] = useState<Mode>("appointments");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useLocalStorage("cr-smith-sidebar-width", 560);
@@ -35,9 +44,19 @@ export default function RoutePlanner() {
   const [isDesktop, setIsDesktop] = useState(false);
   const [enableTransition, setEnableTransition] = useState(false);
   const [routePreview, setRoutePreview] = useState<RoutePreviewData | null>(null);
+  const [pendingSave, setPendingSave] = useState<PendingSave | null>(null);
+  const [showSaveModal, setShowSaveModal] = useState(false);
 
-  // useLayoutEffect runs before the first browser paint — ensures isDesktop (and thus
-  // the inline width style) is applied before anything is shown, preventing flash.
+  // Determine which tabs this user can see
+  const canSeeAppointments = !session || session.role === "admin" || (session.role === "editor" && session.tabs.includes("appointments"));
+  const canSeeCanvass = !session || session.role === "admin" || (session.role === "editor" && session.tabs.includes("canvass"));
+  const canSave = session && session.role !== "viewer";
+
+  // If the current mode is inaccessible, switch to a valid one
+  const visibleModes = (["appointments", "canvass"] as const).filter((m) =>
+    m === "appointments" ? canSeeAppointments : canSeeCanvass
+  );
+
   useLayoutEffect(() => {
     const check = () => setIsDesktop(window.innerWidth >= 1024);
     check();
@@ -73,6 +92,20 @@ export default function RoutePlanner() {
     document.addEventListener("mouseup", onMouseUp);
   }, [sidebarWidth, setSidebarWidth]);
 
+  async function handleSavePlan(name: string, notes: string, visibility: "private" | "shared" | "link") {
+    if (!pendingSave) return null;
+    try {
+      const res = await fetch("/api/plans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, notes, visibility, type: pendingSave.type, inputs: pendingSave.inputs, result: pendingSave.result }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json() as { id: string };
+      return data;
+    } catch { return null; }
+  }
+
   return (
     <div className="flex flex-col lg:flex-row gap-0 h-[calc(100vh-64px)]">
       {/* ── Left panel: form ── */}
@@ -80,7 +113,7 @@ export default function RoutePlanner() {
         className={`relative flex-shrink-0 bg-white border-r border-gray-100 overflow-x-hidden w-full flex flex-col ${enableTransition && !isResizing ? "transition-[width] duration-300" : ""}`}
         style={isDesktop ? { width: sidebarOpen ? sidebarWidth : 40 } : undefined}
       >
-        {/* Drag-to-resize handle — desktop only, visible when open */}
+        {/* Drag-to-resize handle */}
         {isDesktop && sidebarOpen && (
           <div
             onMouseDown={handleDragStart}
@@ -93,7 +126,7 @@ export default function RoutePlanner() {
           </div>
         )}
 
-        {/* Collapse/expand toggle — desktop only */}
+        {/* Collapse/expand toggle */}
         <button
           onClick={() => setSidebarOpen((o) => !o)}
           className="hidden lg:flex items-center justify-center absolute top-3 right-2 z-20 w-6 h-6 rounded-md text-coal/40 hover:text-coal/80 hover:bg-gray-100 transition-colors"
@@ -107,42 +140,47 @@ export default function RoutePlanner() {
           </svg>
         </button>
 
-        {/* ── Mode tabs — sticky ── */}
-        <div
-          className={`flex-shrink-0 flex border-b border-gray-100 bg-white px-5 lg:px-6 ${!sidebarOpen ? "lg:invisible lg:pointer-events-none" : ""}`}
-          role="tablist"
-          aria-label="Route planner mode"
-        >
-          {(["appointments", "canvass"] as const).map((m) => (
-            <button
-              key={m}
-              role="tab"
-              aria-selected={mode === m}
-              onClick={() => {
-                setMode(m);
-                setRoutePreview(null);
-              }}
-              className={`mr-6 py-3.5 text-sm font-semibold border-b-2 -mb-px transition-colors duration-150 ${
-                mode === m
-                  ? "border-loch text-loch"
-                  : "border-transparent text-coal/40 hover:text-coal/60"
-              }`}
-            >
-              {m === "canvass" ? "Canvass" : "Appointments"}
-            </button>
-          ))}
-        </div>
+        {/* ── Mode tabs ── */}
+        {visibleModes.length > 1 && (
+          <div
+            className={`flex-shrink-0 flex border-b border-gray-100 bg-white px-5 lg:px-6 ${!sidebarOpen ? "lg:invisible lg:pointer-events-none" : ""}`}
+            role="tablist"
+            aria-label="Route planner mode"
+          >
+            {visibleModes.map((m) => (
+              <button
+                key={m}
+                role="tab"
+                aria-selected={mode === m}
+                onClick={() => { setMode(m); setRoutePreview(null); }}
+                className={`mr-6 py-3.5 text-sm font-semibold border-b-2 -mb-px transition-colors duration-150 ${
+                  mode === m ? "border-loch text-loch" : "border-transparent text-coal/40 hover:text-coal/60"
+                }`}
+              >
+                {m === "canvass" ? "Canvass" : "Appointments"}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Scrollable content */}
         <div className={`overflow-y-auto flex-1 min-h-0 ${!sidebarOpen ? "lg:invisible lg:pointer-events-none" : ""}`}>
-          {/* Appointments planner — always mounted to preserve state */}
-          <div className={mode === "appointments" ? "" : "hidden"}>
-            <AppointmentsPlanner onRoutePreview={setRoutePreview} />
-          </div>
-          {/* Canvass planner — always mounted to preserve state */}
-          <div className={mode === "canvass" ? "" : "hidden"}>
-            <CanvassPlanner onRoutePreview={setRoutePreview} />
-          </div>
+          {canSeeAppointments && (
+            <div className={mode === "appointments" ? "" : "hidden"}>
+              <AppointmentsPlanner
+                onRoutePreview={setRoutePreview}
+                onResultReady={canSave ? (inputs, result) => setPendingSave({ type: "appointments", inputs, result }) : undefined}
+              />
+            </div>
+          )}
+          {canSeeCanvass && (
+            <div className={mode === "canvass" ? "" : "hidden"}>
+              <CanvassPlanner
+                onRoutePreview={setRoutePreview}
+                onResultReady={canSave ? (inputs, result) => setPendingSave({ type: "canvass", inputs, result }) : undefined}
+              />
+            </div>
+          )}
         </div>
       </aside>
 
@@ -177,10 +215,28 @@ export default function RoutePlanner() {
                   ? "Select a rep\u2019s route to view it on the map."
                   : "Plan your canvass routes, then click a canvasser to view their route on the map."}
               </p>
+              {pendingSave && canSave && (
+                <button
+                  onClick={() => setShowSaveModal(true)}
+                  className="mt-4 inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-loch border border-loch/25 rounded-lg hover:bg-loch/5 transition-colors"
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2M8 2v8m0 0L5 7m3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Save Plan
+                </button>
+              )}
             </div>
           </div>
         )}
       </main>
+
+      {/* Save Plan Modal */}
+      {showSaveModal && pendingSave && (
+        <SavePlanModal
+          type={pendingSave.type}
+          onSave={handleSavePlan}
+          onClose={() => setShowSaveModal(false)}
+        />
+      )}
     </div>
   );
 }
