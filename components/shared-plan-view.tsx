@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 // Leaflet MapView — no SSR
 const MapView = dynamic(() => import("./map-view"), {
@@ -95,7 +95,33 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
   const geocodedAppts = (result.geocodedAppts as GeoAppt[]) ?? [];
   const apptById = new Map(geocodedAppts.map((a) => [a.id, a]));
   const durationHours = (inputs.durationHours as number) ?? 1;
-  const reps = (inputs.reps as RepSnapshot[] | undefined) ?? [];
+
+  // Prefer rep snapshot saved with the plan; fall back to fetching current reps
+  const savedReps = (inputs.reps as RepSnapshot[] | undefined) ?? [];
+  const [fetchedReps, setFetchedReps] = useState<RepSnapshot[]>([]);
+
+  useEffect(() => {
+    if (savedReps.length > 0) return; // snapshot present — no need to fetch
+    fetch("/api/reps")
+      .then((r) => r.json())
+      .then((data: unknown) => {
+        if (Array.isArray(data)) {
+          setFetchedReps(
+            (data as Record<string, unknown>[]).map((r) => ({
+              id:          String(r.id ?? ""),
+              name:        String(r.name ?? ""),
+              homeAddress: typeof r.homeAddress === "string" ? r.homeAddress : undefined,
+              homeLat:     typeof r.homeLat === "number" ? r.homeLat : null,
+              homeLng:     typeof r.homeLng === "number" ? r.homeLng : null,
+            }))
+          );
+        }
+      })
+      .catch(() => { /* no-op — names simply won't resolve */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const reps = savedReps.length > 0 ? savedReps : fetchedReps;
   const repById = new Map(reps.map((r) => [r.id, r]));
 
   const [expandedRepId, setExpandedRepId] = useState<string | null>(null);
