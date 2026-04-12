@@ -3,11 +3,13 @@
 import { useState, FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { useSession } from "@/lib/auth-context";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
+  const { refresh: refreshSession } = useSession();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,10 +30,11 @@ function LoginForm() {
 
       if (res.ok) {
         const data = await res.json() as { user: { role: string } };
+        // Refresh session context so header/plans load immediately after redirect
+        await refreshSession();
         // Viewers go directly to plans
         const dest = data.user.role === "viewer" ? "/plans" : next;
         router.push(dest);
-        router.refresh();
       } else {
         const data = await res.json() as { error?: string };
         setError(data.error ?? "Login failed");

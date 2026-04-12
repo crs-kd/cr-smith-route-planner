@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, useCallback, useLayoutEffect } from "react";
+import { useState, useCallback, useLayoutEffect, useEffect } from "react";
 import AppointmentsPlanner from "./appointments-planner";
 import CanvassPlanner from "./canvass-planner";
 import SavePlanModal from "./save-plan-modal";
@@ -36,7 +36,7 @@ interface PendingSave {
 }
 
 export default function RoutePlanner() {
-  const { session } = useSession();
+  const { session, loading: sessionLoading } = useSession();
   const [mode, setMode] = useState<Mode>("appointments");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useLocalStorage("cr-smith-sidebar-width", 560);
@@ -52,10 +52,18 @@ export default function RoutePlanner() {
   const canSeeCanvass = !session || session.role === "admin" || (session.role === "editor" && session.tabs.includes("canvass"));
   const canSave = session && session.role !== "viewer";
 
-  // If the current mode is inaccessible, switch to a valid one
   const visibleModes = (["appointments", "canvass"] as const).filter((m) =>
     m === "appointments" ? canSeeAppointments : canSeeCanvass
   );
+
+  // Once the session has loaded, correct the active mode if it became inaccessible
+  useEffect(() => {
+    if (sessionLoading) return;
+    if (visibleModes.length > 0 && !visibleModes.includes(mode)) {
+      setMode(visibleModes[0]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionLoading, session]);
 
   useLayoutEffect(() => {
     const check = () => setIsDesktop(window.innerWidth >= 1024);
