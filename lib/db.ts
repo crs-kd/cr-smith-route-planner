@@ -1,6 +1,22 @@
-import { sql } from "@vercel/postgres";
+import { neon } from "@neondatabase/serverless";
 
-export { sql };
+// ── Client ─────────────────────────────────────────────────────────────────
+
+function getDb() {
+  const url = process.env.POSTGRES_URL;
+  if (!url) throw new Error("POSTGRES_URL env var is not set");
+  return neon(url);
+}
+
+// Tagged-template sql helper that matches the @vercel/postgres interface
+export async function sql<T = Record<string, unknown>>(
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+): Promise<{ rows: T[] }> {
+  const db = getDb();
+  const rows = await db(strings, ...values);
+  return { rows: rows as T[] };
+}
 
 // ── Schema migration (run once on first deploy) ────────────────────────────
 
@@ -83,7 +99,6 @@ export async function writeAudit({
       )
     `;
   } catch {
-    // Audit failures must never break the main flow
     console.error("Audit write failed for action:", action);
   }
 }

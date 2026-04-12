@@ -9,7 +9,7 @@ export async function POST() {
     await ensureSchema();
 
     // Only allow if no users exist yet
-    const { rows } = await sql`SELECT COUNT(*)::int AS count FROM users`;
+    const { rows } = await sql<{ count: number }>`SELECT COUNT(*)::int AS count FROM users`;
     if ((rows[0]?.count ?? 0) > 0) {
       return NextResponse.json({ error: "Setup already complete" }, { status: 409 });
     }

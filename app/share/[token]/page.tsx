@@ -23,5 +23,6 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
 
   if (!plan) notFound();
 
-  return <SharedPlanView plan={plan as Parameters<typeof SharedPlanView>[0]["plan"]} />;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return <SharedPlanView plan={plan as any} />;
 }
