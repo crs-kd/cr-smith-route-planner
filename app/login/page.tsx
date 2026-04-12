@@ -46,16 +46,9 @@ function LoginForm() {
   const inputCls = "w-full px-3 py-2.5 text-sm bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-loch/20 focus:border-loch/40 transition-all";
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: "linear-gradient(135deg, #00467f 0%, #005fa3 50%, #004070 100%)" }}>
-      {/* Header */}
-      <header className="header-gradient h-16 flex items-center px-6 shadow-md">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/cr-smith-logo-white.svg" alt="CR Smith" className="h-7 w-auto" />
-      </header>
-
-      {/* Card */}
-      <div className="flex-1 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden">
+    <div className="flex-1 flex items-center justify-center p-4 bg-gray-50 min-h-[calc(100vh-64px)]">
+      <div className="w-full max-w-sm">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="px-8 py-8">
             <h1 className="text-xl font-bold text-coal mb-1">Sign in</h1>
             <p className="text-sm text-coal/50 mb-7">Route Planner — CR Smith</p>
