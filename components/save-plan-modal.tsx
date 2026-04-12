@@ -30,10 +30,14 @@ export default function SavePlanModal({ type, onSave, onClose }: SavePlanModalPr
       if (visibility === "link") {
         const res = await fetch(`/api/plans/${result.id}/share`, { method: "POST" });
         if (res.ok) {
-          const data = await res.json() as { url: string };
-          setShareUrl(data.url);
-          return; // Stay open to show URL
+          const data = await res.json() as { token: string };
+          // Build absolute URL on the client so it's always correct
+          setShareUrl(`${window.location.origin}/share/${data.token}`);
+          return; // Stay open to show the URL
         }
+        // Share endpoint failed — plan is saved but without a share link
+        setError("Plan saved, but the share link couldn't be generated. You can create it from the Plans page.");
+        return;
       }
 
       onClose();

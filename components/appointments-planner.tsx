@@ -1217,8 +1217,13 @@ export default function AppointmentsPlanner({ onRoutePreview, onResultReady }: A
     setExportedRepIds(new Set(result.schedules.map(s => s.repId)));
 
     // Notify parent so it can offer Save Plan
+    const repSnapshot = reps.filter(r => r.isWorking).map(r => ({
+      id: r.id, name: r.name, homeAddress: r.homeAddress,
+      homeLat: r.homeLat ?? null, homeLng: r.homeLng ?? null,
+      startTime: r.startTime, endTime: r.endTime,
+    }));
     onResultReady?.(
-      { type: "appointments", appointments: appts, durationHours, activeRepIds: reps.filter(r => r.isWorking).map(r => r.id) } as Record<string, unknown>,
+      { type: "appointments", appointments: appts, durationHours, activeRepIds: repSnapshot.map(r => r.id), reps: repSnapshot } as Record<string, unknown>,
       { schedules: result.schedules, geocodedAppts: geocodedOk } as unknown as Record<string, unknown>
     );
 
@@ -1737,10 +1742,17 @@ export default function AppointmentsPlanner({ onRoutePreview, onResultReady }: A
               <h3 className="text-xs font-semibold text-coal/60 uppercase tracking-widest flex-shrink-0">Scheduled Routes</h3>
               {onResultReady && (
                 <button
-                  onClick={() => onResultReady(
-                    { type: "appointments", appointments: appts, durationHours, activeRepIds: reps.filter(r => r.isWorking).map(r => r.id) } as Record<string, unknown>,
-                    { schedules: scheduleResult.schedules, geocodedAppts } as unknown as Record<string, unknown>
-                  )}
+                  onClick={() => {
+                    const snap = reps.filter(r => r.isWorking).map(r => ({
+                      id: r.id, name: r.name, homeAddress: r.homeAddress,
+                      homeLat: r.homeLat ?? null, homeLng: r.homeLng ?? null,
+                      startTime: r.startTime, endTime: r.endTime,
+                    }));
+                    onResultReady(
+                      { type: "appointments", appointments: appts, durationHours, activeRepIds: snap.map(r => r.id), reps: snap } as Record<string, unknown>,
+                      { schedules: scheduleResult.schedules, geocodedAppts } as unknown as Record<string, unknown>
+                    );
+                  }}
                   className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-loch border border-loch/20 rounded-md hover:bg-loch/5 transition-colors"
                 >
                   <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2M8 2v8m0 0L5 7m3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
