@@ -34,5 +34,5 @@ export default async function PlanDetailPage({ params }: { params: Promise<{ id:
   if (!canView) notFound();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return <SharedPlanView plan={plan as any} />;
+  return <SharedPlanView plan={plan as any} backHref="/plans" />;
 }

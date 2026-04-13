@@ -25,7 +25,7 @@ interface SharedPlan {
   result: Record<string, unknown>;
 }
 
-export default function SharedPlanView({ plan }: { plan: SharedPlan }) {
+export default function SharedPlanView({ plan, backHref }: { plan: SharedPlan; backHref?: string }) {
   const [{ pillStyles }] = useUISettings();
   const typeLabel = plan.type === "appointments" ? "Appointments" : "Canvass";
 
@@ -36,6 +36,21 @@ export default function SharedPlanView({ plan }: { plan: SharedPlan }) {
   return (
     <div className="min-h-[calc(100vh-64px)] bg-gray-50">
       <div className="max-w-3xl mx-auto px-4 py-8">
+        {/* Back link */}
+        {backHref && (
+          <div className="mb-4">
+            <a
+              href={backHref}
+              className="inline-flex items-center gap-1.5 text-sm text-coal/60 hover:text-coal transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M10 3L4 8l6 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Back to Plans
+            </a>
+          </div>
+        )}
+
         {/* Plan header */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6">
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide" style={pillStyle(pillStyles[plan.type])}>
@@ -104,6 +119,7 @@ type GeoAddr = {
 
 type RoutePreview = {
   anchor: { address: string; lat: number; lng: number };
+  endAnchor?: { address: string; lat: number; lng: number };
   stops: { id: number; lat: number; lng: number; addresses: { address: string }[] }[];
   geometry: [number, number][] | null;
 };
@@ -149,14 +165,22 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
   const repById = new Map(reps.map((r) => [r.id, r]));
 
   const [expandedRepId, setExpandedRepId] = useState<string | null>(null);
-  const [focusedStepIdx, setFocusedStepIdx] = useState<number | null>(null);
+  // Per-rep focused step: keyed by repId so each rep has its own highlight state
+  const [focusedSteps, setFocusedSteps] = useState<Record<string, number | null>>({});
   const [routePreviews, setRoutePreviews] = useState<Map<string, RoutePreview | null>>(new Map());
   const [loadingRepId, setLoadingRepId] = useState<string | null>(null);
+
+  function getFocused(repId: string): number | null {
+    return focusedSteps[repId] ?? null;
+  }
+
+  function setFocused(repId: string, idx: number | null) {
+    setFocusedSteps((prev) => ({ ...prev, [repId]: idx }));
+  }
 
   async function handleToggleRep(repId: string) {
     const next = expandedRepId === repId ? null : repId;
     setExpandedRepId(next);
-    setFocusedStepIdx(null);
     if (!next) return;
 
     // Already fetched — don't re-fetch
@@ -236,6 +260,7 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
         const isExpanded = expandedRepId === sched.repId;
         const preview = routePreviews.get(sched.repId);
         const isLoading = loadingRepId === sched.repId;
+        const focusedStepIdx = getFocused(sched.repId);
 
         // Sort assignments by time for display
         const sortedAssignments = [...sched.assignments].sort((a, b) => {
@@ -292,6 +317,19 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
 
                 {/* Route steps */}
                 <ol className="divide-y divide-gray-50">
+                  {/* Start row */}
+                  {rep?.homeAddress && (
+                    <li className="flex items-start gap-3 px-4 py-3">
+                      <span className="flex-shrink-0 w-7 h-7 rounded-full bg-map-anchor text-white text-xs font-bold flex items-center justify-center mt-0.5">S</span>
+                      <div>
+                        <p className="text-xs font-semibold text-map-anchor uppercase tracking-wide">Start</p>
+                        <p className="text-sm font-semibold text-coal mt-0.5">Home</p>
+                        <p className="text-xs text-coal/50">{rep.homeAddress}</p>
+                      </div>
+                    </li>
+                  )}
+
+                  {/* Appointment stop rows */}
                   {sortedAssignments.map((a, idx) => {
                     const appt = apptById.get(a.apptId);
                     if (!appt) return null;
@@ -305,7 +343,7 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
                     return (
                       <li
                         key={a.apptId}
-                        onClick={() => setFocusedStepIdx(focusedStepIdx === idx ? null : idx)}
+                        onClick={() => setFocused(sched.repId, focusedStepIdx === idx ? null : idx)}
                         className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors ${isFocused ? "ring-2 ring-inset ring-loch/40 bg-loch/5" : "hover:bg-gray-50"}`}
                       >
                         <span className="flex-shrink-0 w-7 h-7 rounded-full bg-loch text-white text-xs font-bold flex items-center justify-center mt-0.5">
@@ -322,6 +360,18 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
                       </li>
                     );
                   })}
+
+                  {/* End row */}
+                  {rep?.homeAddress && (
+                    <li className="flex items-start gap-3 px-4 py-3">
+                      <span className="flex-shrink-0 w-7 h-7 rounded-full bg-map-anchor text-white text-xs font-bold flex items-center justify-center mt-0.5">E</span>
+                      <div>
+                        <p className="text-xs font-semibold text-map-anchor uppercase tracking-wide">End</p>
+                        <p className="text-sm font-semibold text-coal mt-0.5">Home</p>
+                        <p className="text-xs text-coal/50">{rep.homeAddress}</p>
+                      </div>
+                    </li>
+                  )}
                 </ol>
               </>
             )}
@@ -385,15 +435,23 @@ function CanvassResultView({ result, inputs }: { result: Record<string, unknown>
   const canvasserById = new Map(canvassers.map((c) => [c.id, c]));
 
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const [focusedStepIdx, setFocusedStepIdx] = useState<number | null>(null);
+  // Per-canvasser:date focused step
+  const [focusedSteps, setFocusedSteps] = useState<Record<string, number | null>>({});
   const [routePreviews, setRoutePreviews] = useState<Map<string, RoutePreview | null>>(new Map());
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
+
+  function getFocused(key: string): number | null {
+    return focusedSteps[key] ?? null;
+  }
+
+  function setFocused(key: string, idx: number | null) {
+    setFocusedSteps((prev) => ({ ...prev, [key]: idx }));
+  }
 
   async function handleToggleCanvasser(canvasserId: string, date: string) {
     const key = `${canvasserId}:${date}`;
     const next = expandedKey === key ? null : key;
     setExpandedKey(next);
-    setFocusedStepIdx(null);
     if (!next) return;
 
     if (routePreviews.has(key)) return;
@@ -449,8 +507,17 @@ function CanvassResultView({ result, inputs }: { result: Record<string, unknown>
     } catch { /* fall back to straight lines */ }
 
     const anchor = { address: canvasser.startAddress, lat: canvasser.startLat, lng: canvasser.startLng };
+    // Only add endAnchor when it's a genuinely different location
+    const hasDifferentEnd =
+      canvasser.endLat != null &&
+      canvasser.endLng != null &&
+      (Math.abs(canvasser.endLat - canvasser.startLat) > 0.0001 ||
+       Math.abs(canvasser.endLng - canvasser.startLng) > 0.0001);
+    const endAnchor = hasDifferentEnd
+      ? { address: canvasser.endAddress, lat: canvasser.endLat!, lng: canvasser.endLng! }
+      : undefined;
     const stops = orderedStops.map((s, i) => ({ id: i + 1, lat: s.lat, lng: s.lng, addresses: s.addresses }));
-    setRoutePreviews((prev) => new Map(prev).set(key, { anchor, stops, geometry }));
+    setRoutePreviews((prev) => new Map(prev).set(key, { anchor, endAnchor, stops, geometry }));
     setLoadingKey(null);
   }
 
@@ -484,6 +551,7 @@ function CanvassResultView({ result, inputs }: { result: Record<string, unknown>
               const preview = routePreviews.get(key);
               const isLoading = loadingKey === key;
               const totalAddrs = route.stops.reduce((n, s) => n + s.addressIds.length, 0);
+              const focusedStepIdx = getFocused(key);
 
               return (
                 <div key={key} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -518,6 +586,7 @@ function CanvassResultView({ result, inputs }: { result: Record<string, unknown>
                         <div className="h-56 border-b border-gray-100">
                           <MapView
                             anchor={preview.anchor}
+                            endAnchor={preview.endAnchor}
                             stops={preview.stops}
                             routeGeometry={preview.geometry}
                             focusedSegmentIdx={focusedStepIdx}
@@ -534,10 +603,10 @@ function CanvassResultView({ result, inputs }: { result: Record<string, unknown>
                       <ol className="divide-y divide-gray-50">
                         {/* Start row */}
                         {canvasser && (
-                          <li className="flex items-start gap-3 px-4 py-3 border-b border-gray-50">
+                          <li className="flex items-start gap-3 px-4 py-3">
                             <span className="flex-shrink-0 w-7 h-7 rounded-full bg-map-anchor text-white text-xs font-bold flex items-center justify-center mt-0.5">S</span>
                             <div>
-                              <p className="text-xs font-semibold text-loch uppercase tracking-wide">Start</p>
+                              <p className="text-xs font-semibold text-map-anchor uppercase tracking-wide">Start</p>
                               <p className="text-sm font-semibold text-coal mt-0.5">{canvasser.startLabel}</p>
                               <p className="text-xs text-coal/50">{canvasser.startAddress}</p>
                             </div>
@@ -552,7 +621,7 @@ function CanvassResultView({ result, inputs }: { result: Record<string, unknown>
                           return (
                             <li
                               key={stop.addressIds[0] ?? idx}
-                              onClick={() => setFocusedStepIdx(focusedStepIdx === idx ? null : idx)}
+                              onClick={() => setFocused(key, focusedStepIdx === idx ? null : idx)}
                               className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors ${isFocused ? "ring-2 ring-inset ring-loch/40 bg-loch/5" : "hover:bg-gray-50"}`}
                             >
                               <span className="flex-shrink-0 w-7 h-7 rounded-full bg-loch text-white text-xs font-bold flex items-center justify-center mt-0.5">
@@ -584,7 +653,7 @@ function CanvassResultView({ result, inputs }: { result: Record<string, unknown>
                           <li className="flex items-start gap-3 px-4 py-3">
                             <span className="flex-shrink-0 w-7 h-7 rounded-full bg-map-anchor text-white text-xs font-bold flex items-center justify-center mt-0.5">E</span>
                             <div>
-                              <p className="text-xs font-semibold text-loch uppercase tracking-wide">End</p>
+                              <p className="text-xs font-semibold text-map-anchor uppercase tracking-wide">End</p>
                               <p className="text-sm font-semibold text-coal mt-0.5">{canvasser.endLabel}</p>
                               <p className="text-xs text-coal/50">{canvasser.endAddress}</p>
                             </div>

@@ -63,11 +63,118 @@ function buildWaypointIndices(
   return indices;
 }
 
+/**
+ * Redraws route polylines and direction arrows into a Leaflet LayerGroup.
+ * Called both on initial render and whenever focusedSegmentIdx changes.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function drawRouteLayer(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  L: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  layer: any,
+  fullCoords: [number, number][],
+  waypointList: [number, number][],
+  focusedSegmentIdx: number | null
+) {
+  layer.clearLayers();
+  if (fullCoords.length < 2) return;
+
+  // Compute the focused segment slice
+  let focusedSegment: [number, number][] | null = null;
+  if (focusedSegmentIdx !== null) {
+    const segFrom = waypointList[focusedSegmentIdx];
+    const segTo   = waypointList[focusedSegmentIdx + 1];
+    if (segFrom && segTo) {
+      const wpIndices = buildWaypointIndices(fullCoords, waypointList);
+      const startI = wpIndices[focusedSegmentIdx];
+      const endI   = wpIndices[focusedSegmentIdx + 1];
+      if (startI !== undefined && endI !== undefined && endI >= startI) {
+        focusedSegment = fullCoords.slice(startI, endI + 1);
+        if (focusedSegment.length < 2) focusedSegment = [segFrom, segTo];
+      } else {
+        focusedSegment = [segFrom, segTo];
+      }
+    }
+  }
+
+  const isFocused = focusedSegment !== null;
+
+  // ── Base route ────────────────────────────────────────────────────────────
+  L.polyline(fullCoords, {
+    color: isFocused ? "#b0b8c9" : "#2762EA",
+    weight: isFocused ? 3 : 4,
+    dashArray: isFocused ? undefined : "16 10",
+    opacity: isFocused ? 0.45 : 0.85,
+    className: isFocused ? "" : "cr-route-animated",
+  }).addTo(layer);
+
+  // ── Focused segment overlay ───────────────────────────────────────────────
+  if (focusedSegment && focusedSegment.length > 1) {
+    L.polyline(focusedSegment, {
+      color: "#2762EA",
+      weight: 5,
+      dashArray: "16 10",
+      opacity: 1,
+      className: "cr-route-animated",
+    }).addTo(layer);
+  }
+
+  // ── Directional chevron arrows every ~350 m ───────────────────────────────
+  const arrowCoords = focusedSegment ?? fullCoords;
+  const ARROW_INTERVAL_M = 350;
+  let accumulated = 0;
+  let nextAt = ARROW_INTERVAL_M * 0.5;
+
+  for (let i = 1; i < arrowCoords.length; i++) {
+    const from = arrowCoords[i - 1];
+    const to   = arrowCoords[i];
+    const segLen = distM(from, to);
+    accumulated += segLen;
+
+    while (accumulated >= nextAt) {
+      const overshoot = accumulated - nextAt;
+      const t = Math.max(0, 1 - overshoot / segLen);
+      const lat = from[0] + (to[0] - from[0]) * t;
+      const lng = from[1] + (to[1] - from[1]) * t;
+      const deg = bearing(from, to);
+
+      const arrowIcon = L.divIcon({
+        className: "",
+        html: `<div style="
+          width:18px;height:18px;
+          display:flex;align-items:center;justify-content:center;
+          transform:rotate(${deg}deg);
+          opacity:${isFocused ? 0.9 : 0.65};
+        ">
+          <svg width="10" height="13" viewBox="0 0 10 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <polyline points="2,11 5,2 8,11"
+              stroke="#2762EA" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>`,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      });
+
+      L.marker([lat, lng], { icon: arrowIcon, interactive: false, keyboard: false }).addTo(layer);
+      nextAt += ARROW_INTERVAL_M;
+    }
+  }
+}
+
 export default function MapView({ anchor, endAnchor, stops, routeGeometry, focusedSegmentIdx }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const routeLayerRef = useRef<any>(null);
+  const fullCoordsRef = useRef<[number, number][]>([]);
+  const waypointListRef = useRef<[number, number][]>([]);
 
+  // ── Effect 1: full map setup ───────────────────────────────────────────────
+  // Runs when anchor/stops/geometry change. Does NOT depend on focusedSegmentIdx
+  // so that clicking a step never re-initialises the whole map.
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -85,6 +192,9 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
         mapRef.current.remove();
         mapRef.current = null;
       }
+      routeLayerRef.current = null;
+      fullCoordsRef.current = [];
+      waypointListRef.current = [];
 
       const map = L.map(containerRef.current!, { zoomControl: false }).setView([anchor.lat, anchor.lng], 14);
       mapRef.current = map;
@@ -96,7 +206,7 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
 
       const allPoints: [number, number][] = [];
 
-      // ── Anchor marker ──────────────────────────────────────────────────────
+      // ── Anchor marker ────────────────────────────────────────────────────
       const anchorIcon = L.divIcon({
         className: "",
         html: `<div style="
@@ -142,7 +252,7 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
       }
       allPoints.push([anchor.lat, anchor.lng]);
 
-      // ── Stop / group markers ───────────────────────────────────────────────
+      // ── Stop / group markers ─────────────────────────────────────────────
       const routeCoords: [number, number][] = [[anchor.lat, anchor.lng]];
 
       stops.forEach((group, idx) => {
@@ -205,108 +315,29 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
         allPoints.push([group.lat, group.lng]);
       });
 
-      // ── Full route geometry ────────────────────────────────────────────────
+      // ── Build full coords and waypoint list ──────────────────────────────
+      const end = endAnchor ?? anchor;
       const fullCoords: [number, number][] =
         routeGeometry && routeGeometry.length > 1
           ? routeGeometry
-          : [...routeCoords, [anchor.lat, anchor.lng]];
+          : [...routeCoords, [end.lat, end.lng]];
 
-      // ── Compute focused segment if needed ─────────────────────────────────
-      // Waypoints in trip order: anchor, stop[0], …, stop[n-1], anchor
-      // focusedSegmentIdx 0 → anchor→stop[0], 1 → stop[0]→stop[1], …
-      let focusedSegment: [number, number][] | null = null;
+      const waypointList: [number, number][] = [
+        [anchor.lat, anchor.lng],
+        ...stops.map((s): [number, number] => [s.lat, s.lng]),
+        [end.lat, end.lng],
+      ];
 
-      if (focusedSegmentIdx !== null) {
-        const end = endAnchor ?? anchor;
-        const waypointList: [number, number][] = [
-          [anchor.lat, anchor.lng],
-          ...stops.map((s): [number, number] => [s.lat, s.lng]),
-          [end.lat, end.lng],
-        ];
+      // Store for the focus-update effect
+      fullCoordsRef.current = fullCoords;
+      waypointListRef.current = waypointList;
 
-        const segFrom = waypointList[focusedSegmentIdx];
-        const segTo   = waypointList[focusedSegmentIdx + 1];
-
-        if (segFrom && segTo) {
-          if (routeGeometry && routeGeometry.length > 1) {
-            // Build waypoint→geometry indices with monotonic forward search
-            const wpIndices = buildWaypointIndices(fullCoords, waypointList);
-            const startI = wpIndices[focusedSegmentIdx];
-            const endI   = wpIndices[focusedSegmentIdx + 1];
-            focusedSegment = fullCoords.slice(startI, endI + 1);
-          } else {
-            focusedSegment = [segFrom, segTo];
-          }
-        }
-      }
-
-      // ── Draw base route ────────────────────────────────────────────────────
-      const isFocused = focusedSegment !== null;
-
-      L.polyline(fullCoords, {
-        color: isFocused ? "#b0b8c9" : "#2762EA",   // grey when something is focused
-        weight: isFocused ? 3 : 4,
-        dashArray: isFocused ? undefined : "16 10",
-        opacity: isFocused ? 0.45 : 0.85,
-        className: isFocused ? "" : "cr-route-animated",
-      }).addTo(map);
-
-      // ── Overlay focused segment in navy with animation ─────────────────────
-      if (focusedSegment && focusedSegment.length > 1) {
-        L.polyline(focusedSegment, {
-          color: "#2762EA",
-          weight: 5,
-          dashArray: "16 10",
-          opacity: 1,
-          className: "cr-route-animated",
-        }).addTo(map);
-      }
-
-      // ── Directional chevron arrows every ~350 m ────────────────────────────
-      // Show arrows only on the focused segment when focused, otherwise the full route
-      const arrowCoords = focusedSegment ?? fullCoords;
-      const ARROW_INTERVAL_M = 350;
-      let accumulated = 0;
-      let nextAt = ARROW_INTERVAL_M * 0.5;
-
-      for (let i = 1; i < arrowCoords.length; i++) {
-        const from = arrowCoords[i - 1];
-        const to   = arrowCoords[i];
-        const segLen = distM(from, to);
-        accumulated += segLen;
-
-        while (accumulated >= nextAt) {
-          const overshoot = accumulated - nextAt;
-          const t = Math.max(0, 1 - overshoot / segLen);
-          const lat = from[0] + (to[0] - from[0]) * t;
-          const lng = from[1] + (to[1] - from[1]) * t;
-          const deg = bearing(from, to);
-
-          const arrowIcon = L.divIcon({
-            className: "",
-            html: `<div style="
-              width:18px;height:18px;
-              display:flex;align-items:center;justify-content:center;
-              transform:rotate(${deg}deg);
-              opacity:${isFocused ? 0.9 : 0.65};
-            ">
-              <svg width="10" height="13" viewBox="0 0 10 13" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <polyline points="2,11 5,2 8,11"
-                  stroke="#2762EA" stroke-width="2.5"
-                  stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </div>`,
-            iconSize: [18, 18],
-            iconAnchor: [9, 9],
-          });
-
-          L.marker([lat, lng], { icon: arrowIcon, interactive: false, keyboard: false }).addTo(map);
-          nextAt += ARROW_INTERVAL_M;
-        }
-      }
+      // ── Create route layer group and draw initial (unfocused) route ──────
+      const routeLayer = L.layerGroup().addTo(map);
+      routeLayerRef.current = routeLayer;
+      drawRouteLayer(L, routeLayer, fullCoords, waypointList, null);
 
       // ── Custom zoom + fit-route control ───────────────────────────────────
-      // Replaces the default zoom control with +  /  fit  /  − stacked vertically.
       const fitCoords = fullCoords.length > 1 ? fullCoords : allPoints;
 
       const FitControl = L.Control.extend({
@@ -314,7 +345,6 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
         onAdd() {
           const bar = L.DomUtil.create("div", "leaflet-bar leaflet-control");
 
-          // ── Zoom in ──
           const zoomIn = L.DomUtil.create("a", "leaflet-control-zoom-in", bar) as HTMLAnchorElement;
           zoomIn.innerHTML = "+";
           zoomIn.title = "Zoom in";
@@ -322,7 +352,6 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
           zoomIn.setAttribute("role", "button");
           L.DomEvent.on(zoomIn, "click", L.DomEvent.stop).on(zoomIn, "click", () => map.zoomIn());
 
-          // ── Fit route ──
           const fitBtn = L.DomUtil.create("a", "", bar) as HTMLAnchorElement;
           fitBtn.title = "Fit route to view";
           fitBtn.href = "#";
@@ -336,7 +365,6 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
             map.fitBounds(fitCoords as [number, number][], { padding: [40, 40] });
           });
 
-          // ── Zoom out ──
           const zoomOut = L.DomUtil.create("a", "leaflet-control-zoom-out", bar) as HTMLAnchorElement;
           zoomOut.innerHTML = "&#8722;";
           zoomOut.title = "Zoom out";
@@ -349,14 +377,13 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
       });
       new FitControl().addTo(map);
 
-      // ── Initial view: fit the full road geometry ───────────────────────────
+      // ── Initial view: fit the full road geometry ─────────────────────────
       if (fitCoords.length > 1) {
         map.fitBounds(fitCoords as [number, number][], { padding: [40, 40], animate: false });
       }
     });
 
     // Invalidate Leaflet's cached size whenever the container is resized
-    // (e.g. sidebar collapse/expand, drag-resize)
     const resizeObserver = new ResizeObserver(() => {
       mapRef.current?.invalidateSize();
     });
@@ -364,6 +391,9 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
 
     return () => {
       resizeObserver.disconnect();
+      routeLayerRef.current = null;
+      fullCoordsRef.current = [];
+      waypointListRef.current = [];
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -371,6 +401,18 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor.lat, anchor.lng, endAnchor?.lat, endAnchor?.lng, stops, routeGeometry]);
+
+  // ── Effect 2: focused segment update ──────────────────────────────────────
+  // Only redraws the route layer — no map teardown/rebuild.
+  useEffect(() => {
+    const layer = routeLayerRef.current;
+    const coords = fullCoordsRef.current;
+    const waypoints = waypointListRef.current;
+    if (!layer || coords.length < 2) return;
+    import("leaflet").then((L) => {
+      drawRouteLayer(L, layer, coords, waypoints, focusedSegmentIdx);
+    });
+  }, [focusedSegmentIdx]);
 
   return (
     <>
@@ -390,7 +432,7 @@ export default function MapView({ anchor, endAnchor, stops, routeGeometry, focus
         ref={containerRef}
         className="w-full h-full rounded-xl overflow-hidden"
         role="region"
-        aria-label="Canvassing route map"
+        aria-label="Route map"
       />
     </>
   );

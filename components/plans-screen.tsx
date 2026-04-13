@@ -194,7 +194,7 @@ export default function PlansScreen() {
               </select>
             </div>
 
-            {/* Plan cards */}
+            {/* Plan list */}
             {loading ? (
               <div className="text-sm text-coal/40 text-center py-16">Loading…</div>
             ) : sorted.length === 0 ? (
@@ -208,65 +208,59 @@ export default function PlansScreen() {
                 )}
               </div>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
                 {sorted.map((plan) => (
-                  <div key={plan.id} className="bg-white border border-gray-200 rounded-xl p-4 flex flex-col gap-2.5 hover:border-loch/30 hover:shadow-sm transition-all">
-                    {/* Top row */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
+                  <div key={plan.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors group">
+                    {/* Type indicator */}
+                    <span
+                      className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase"
+                      style={pillStyle(pillStyles[plan.type])}
+                    >
+                      {plan.type === "appointments" ? "Appts" : "Canvass"}
+                    </span>
+
+                    {/* Main info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-semibold text-coal truncate">{plan.name}</p>
-                        <div className="flex gap-1.5 mt-1 flex-wrap">
-                          <span
-                            className="text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase"
-                            style={pillStyle(pillStyles[plan.type])}
-                          >
-                            {plan.type}
-                          </span>
-                          <span
-                            className="text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase"
-                            style={pillStyle(pillStyles[plan.visibility])}
-                          >
-                            {VIS_LABEL[plan.visibility]}
-                          </span>
-                        </div>
+                        <span
+                          className="flex-shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase"
+                          style={pillStyle(pillStyles[plan.visibility])}
+                        >
+                          {VIS_LABEL[plan.visibility]}
+                        </span>
                       </div>
-                    </div>
-
-                    {/* Notes */}
-                    {plan.notes && (
-                      <p className="text-xs text-coal/50 line-clamp-2">{plan.notes}</p>
-                    )}
-
-                    {/* Meta */}
-                    <div className="flex items-center justify-between text-[11px] text-coal/40 pt-0.5">
-                      <span>By {plan.creator_name}</span>
-                      <span>{formatDate(plan.created_at)}</span>
+                      <p className="text-xs text-coal/40 mt-0.5 truncate">
+                        {plan.creator_name} · {formatDate(plan.created_at)}
+                        {plan.notes ? ` · ${plan.notes}` : ""}
+                      </p>
                     </div>
 
                     {/* Actions */}
-                    <div className="flex gap-2 pt-1 border-t border-gray-100">
+                    <div className="flex items-center gap-1 flex-shrink-0">
                       <a
                         href={`/plans/${plan.id}`}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium text-loch border border-loch/20 rounded-lg hover:bg-loch/5 transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-loch border border-loch/20 rounded-lg hover:bg-loch/5 transition-colors"
                       >
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M1 8s3-5.5 7-5.5S15 8 15 8s-3 5.5-7 5.5S1 8 1 8z" stroke="currentColor" strokeWidth="1.4"/><circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.4"/></svg>
                         View
                       </a>
                       <button
                         onClick={() => copyShareLink(plan)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-coal/50 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                        title="Copy share link"
+                        className="p-2 text-coal/30 hover:text-coal/70 hover:bg-gray-100 rounded-lg transition-colors"
+                        title={copyId === plan.id ? "Copied!" : "Copy share link"}
+                        aria-label="Copy share link"
                       >
                         {copyId === plan.id ? (
-                          <><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> Copied</>
+                          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                         ) : (
-                          <><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3.5A2.5 2.5 0 1112.5 6L9 9.5m-2 3A2.5 2.5 0 113.5 10l3.5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg> Share</>
+                          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M10 3.5A2.5 2.5 0 1112.5 6L9 9.5m-2 3A2.5 2.5 0 113.5 10l3.5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
                         )}
                       </button>
                       {(session?.role === "admin" || plan.creator_email === session?.email) && (
                         <button
                           onClick={() => deletePlan(plan.id, plan.name)}
-                          className="p-1.5 text-coal/30 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          className="p-2 text-coal/30 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                           aria-label="Delete plan"
                         >
                           <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2h4v2M5 4v8a1 1 0 001 1h4a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
