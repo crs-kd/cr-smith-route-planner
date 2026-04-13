@@ -1,7 +1,13 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+
+const PrintMapView = dynamic(() => import("./map-view"), {
+  ssr: false,
+  loading: () => <div style={{ height: 200, background: "#f9fafb", borderRadius: 8 }} />,
+});
 import {
   DndContext,
   closestCenter,
@@ -30,6 +36,7 @@ import {
   scheduleCanvass,
 } from "@/lib/canvass-scheduler";
 import { SalesBase, SALES_BASES, normaliseHHMM, formatDurationSec, parseHHMM } from "@/lib/appt-scheduler";
+import { useLocalStorage } from "@/lib/use-local-storage";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -870,7 +877,14 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
 
   const [addressInput, setAddressInput] = useState("");
   const [startDate, setStartDate] = useState(todayISO());
-  const [durationMins, setDurationMins] = useState(20);
+  const [durationMins, setDurationMins] = useLocalStorage("cr-smith-canvass-duration", 20);
+  const [durationInput, setDurationInput] = useState(String(durationMins));
+
+  // Sync display string when localStorage hydrates
+  useEffect(() => {
+    setDurationInput(String(durationMins));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [durationMins]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [statusMsg, setStatusMsg] = useState("");
   const [canvassResult, setCanvassResult] = useState<CanvassResult | null>(null);
@@ -879,6 +893,8 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const [focusedStepIdx, setFocusedStepIdx] = useState<number | null>(null);
   const [exportedKeys, setExportedKeys] = useState<Set<string>>(new Set());
+  const [routeGeometryCache, setRouteGeometryCache] = useState<Map<string, RoutePreviewData | null>>(new Map());
+  const [isPrintLoading, setIsPrintLoading] = useState(false);
   const [showManager, setShowManager] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -1024,8 +1040,26 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
     ));
 
     // Notify parent so it can offer Save Plan
+    const canvasserSnapshot = workingCanvassers.map(c => {
+      const startBase = c.startLocation === "base" && c.startBaseId
+        ? bases.find(b => b.id === c.startBaseId) : undefined;
+      const endBase = c.endLocation === "base" && c.endBaseId
+        ? bases.find(b => b.id === c.endBaseId) : undefined;
+      return {
+        id: c.id, name: c.name, homeAddress: c.homeAddress,
+        homeLat: c.homeLat ?? null, homeLng: c.homeLng ?? null,
+        startAddress: startBase ? startBase.address : c.homeAddress,
+        startLat: startBase?.lat ?? c.homeLat ?? null,
+        startLng: startBase?.lng ?? c.homeLng ?? null,
+        startLabel: startBase ? `${startBase.name} base` : "Home",
+        endAddress: endBase ? endBase.address : c.homeAddress,
+        endLat: endBase?.lat ?? c.homeLat ?? null,
+        endLng: endBase?.lng ?? c.homeLng ?? null,
+        endLabel: endBase ? `${endBase.name} base` : "Home",
+      };
+    });
     onResultReady?.(
-      { type: "canvass", addresses: rawAddresses, startDate, durationMins, activeCanvasserIds: workingCanvassers.map(c => c.id) } as Record<string, unknown>,
+      { type: "canvass", addresses: rawAddresses, startDate, durationMins, activeCanvasserIds: workingCanvassers.map(c => c.id), canvassers: canvasserSnapshot } as Record<string, unknown>,
       { days: result.days, unassigned: result.unassigned, geocodedAddresses: geocoded } as unknown as Record<string, unknown>
     );
 
@@ -1145,7 +1179,7 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
       }
     } catch { /* straight lines fallback */ }
 
-    onRoutePreview({
+    const previewData: RoutePreviewData = {
       anchor: { address: startPt.address, lat: startPt.lat, lng: startPt.lng },
       stops: orderedStops.map((s, i) => ({
         id: i,
@@ -1154,7 +1188,9 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
         addresses: s.addrs.map((a) => ({ address: a.address })),
       })),
       geometry,
-    });
+    };
+    setRouteGeometryCache(prev => new Map(prev).set(key, previewData));
+    onRoutePreview(previewData);
   }
 
   if (showManager) {
@@ -1185,8 +1221,14 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
             inputMode="numeric"
             pattern="[0-9]*"
             maxLength={3}
-            value={durationMins}
-            onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) setDurationMins(v); }}
+            value={durationInput}
+            onChange={(e) => setDurationInput(e.target.value.replace(/[^0-9]/g, ""))}
+            onBlur={() => {
+              const v = parseInt(durationInput);
+              const next = isNaN(v) ? 0 : v;
+              setDurationMins(next);
+              setDurationInput(String(next));
+            }}
             className="w-14 px-2 py-1 text-sm text-coal bg-snow border border-loch/10 rounded-lg outline-none focus:ring-2 focus:ring-loch/20 text-center"
             aria-label="Minutes per door"
           />
@@ -1316,9 +1358,27 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
             <h3 className="text-xs font-semibold text-coal/60 uppercase tracking-widest flex-shrink-0">Canvass Plan</h3>
             {onResultReady && (
               <button
-                onClick={() => {/* parent already has result — trigger save */
+                onClick={() => {
+                  const snap = workingCanvassers.map(c => {
+                    const startBase = c.startLocation === "base" && c.startBaseId
+                      ? bases.find(b => b.id === c.startBaseId) : undefined;
+                    const endBase = c.endLocation === "base" && c.endBaseId
+                      ? bases.find(b => b.id === c.endBaseId) : undefined;
+                    return {
+                      id: c.id, name: c.name, homeAddress: c.homeAddress,
+                      homeLat: c.homeLat ?? null, homeLng: c.homeLng ?? null,
+                      startAddress: startBase ? startBase.address : c.homeAddress,
+                      startLat: startBase?.lat ?? c.homeLat ?? null,
+                      startLng: startBase?.lng ?? c.homeLng ?? null,
+                      startLabel: startBase ? `${startBase.name} base` : "Home",
+                      endAddress: endBase ? endBase.address : c.homeAddress,
+                      endLat: endBase?.lat ?? c.homeLat ?? null,
+                      endLng: endBase?.lng ?? c.homeLng ?? null,
+                      endLabel: endBase ? `${endBase.name} base` : "Home",
+                    };
+                  });
                   onResultReady(
-                    { type: "canvass", addresses: geocodedAddresses.map(a => a.address), startDate, durationMins, activeCanvasserIds: workingCanvassers.map(c => c.id) } as Record<string, unknown>,
+                    { type: "canvass", addresses: geocodedAddresses.map(a => a.address), startDate, durationMins, activeCanvasserIds: workingCanvassers.map(c => c.id), canvassers: snap } as Record<string, unknown>,
                     { days: canvassResult!.days, unassigned: canvassResult!.unassigned, geocodedAddresses } as unknown as Record<string, unknown>
                   );
                 }}
@@ -1352,11 +1412,19 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
             })()}
             {/* Export button */}
             <button
-              onClick={() => window.print()}
-              className="text-[11px] font-medium px-2 py-1 rounded-md border border-gray-200 text-coal/50 hover:text-coal hover:bg-gray-50 transition-colors flex items-center gap-1"
+              onClick={async () => {
+                setIsPrintLoading(true);
+                await new Promise(r => setTimeout(r, 2500));
+                window.print();
+                setIsPrintLoading(false);
+              }}
+              disabled={isPrintLoading}
+              className="text-[11px] font-medium px-2 py-1 rounded-md border border-gray-200 text-coal/50 hover:text-coal hover:bg-gray-50 transition-colors flex items-center gap-1 disabled:opacity-60"
             >
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 10v3a1 1 0 001 1h8a1 1 0 001-1v-3M8 2v8m0 0L5 7m3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              Export
+              {isPrintLoading
+                ? <><div className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin" /> Preparing…</>
+                : <><svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 10v3a1 1 0 001 1h8a1 1 0 001-1v-3M8 2v8m0 0L5 7m3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>Export</>
+              }
             </button>
           </div>
 
@@ -1406,8 +1474,8 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
 
           {/* Print portal */}
           {typeof document !== "undefined" && createPortal(
-            <div id="print-portal" style={{ display: "none" }}>
-              <style>{`@media print { body > *:not(#print-portal) { display: none !important; } #print-portal { display: block !important; } }`}</style>
+            <div id="print-portal" style={isPrintLoading ? { display: "block", position: "fixed", left: -9999, top: 0, width: 794, overflowY: "auto" } : { display: "none" }}>
+              <style>{`@media print { body > *:not(#print-portal) { display: none !important; } #print-portal { display: block !important; position: static !important; left: 0 !important; width: 100% !important; } }`}</style>
               {canvassResult.days.flatMap((dayPlan) => {
                 const dateObj = new Date(dayPlan.date + "T12:00:00");
                 const dateLabel = dateObj.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -1417,10 +1485,23 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
                   .map((route) => {
                     const canvasser = canvassers.find((c) => c.id === route.canvasserId);
                     if (!canvasser) return null;
+                    const routeKey = `${route.canvasserId}:${dayPlan.date}`;
+                    const preview = routeGeometryCache.get(routeKey);
                     return (
-                      <div key={`${route.canvasserId}:${dayPlan.date}`} style={{ pageBreakAfter: "always", padding: "2rem", fontFamily: "sans-serif" }}>
+                      <div key={routeKey} style={{ pageBreakAfter: "always", padding: "2rem", fontFamily: "sans-serif" }}>
                         <h1 style={{ fontSize: "1.5rem", fontWeight: "bold", marginBottom: "0.25rem" }}>{canvasser.name}</h1>
-                        <p style={{ fontSize: "0.875rem", color: "#6b7280", marginBottom: "1.5rem" }}>{dateLabel}</p>
+                        <p style={{ fontSize: "0.875rem", color: "#6b7280", marginBottom: "1rem" }}>{dateLabel}</p>
+                        {/* Route map */}
+                        {preview && (
+                          <div style={{ height: 200, marginBottom: "1.5rem", borderRadius: 8, overflow: "hidden", pageBreakInside: "avoid" }}>
+                            <PrintMapView
+                              anchor={preview.anchor}
+                              stops={preview.stops}
+                              routeGeometry={preview.geometry}
+                              focusedSegmentIdx={null}
+                            />
+                          </div>
+                        )}
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
                           <thead>
                             <tr style={{ borderBottom: "2px solid #d1d5db" }}>

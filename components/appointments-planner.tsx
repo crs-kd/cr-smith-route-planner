@@ -1,7 +1,13 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
+
+const PrintMapView = dynamic(() => import("./map-view"), {
+  ssr: false,
+  loading: () => <div style={{ height: 200, background: "#f9fafb", borderRadius: 8 }} />,
+});
 import {
   DndContext,
   closestCenter,
@@ -1071,6 +1077,8 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
   const [sortBy, setSortBy] = useState<"name" | "appointments" | "travel">("name");
   const [groupByArea, setGroupByArea] = useState(false);
   const [exportedRepIds, setExportedRepIds] = useState<Set<string>>(new Set());
+  const [routeGeometryCache, setRouteGeometryCache] = useState<Map<string, RoutePreviewData | null>>(new Map());
+  const [isPrintLoading, setIsPrintLoading] = useState(false);
 
   const repForAppt = new Map<string, string>();
   if (scheduleResult) {
@@ -1328,11 +1336,13 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
         geometry = data.routes[0].geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number]);
       }
     } catch { /* straight lines */ }
-    onRoutePreview({
+    const previewData: RoutePreviewData = {
       anchor: { address: startLoc.address, lat: startLoc.lat, lng: startLoc.lng },
       stops: orderedAppts.map((a, i) => ({ id: i, lat: a.lat!, lng: a.lng!, addresses: [{ address: a.urn ? `${a.urn} — ${a.address}` : a.address }] })),
       geometry,
-    });
+    };
+    setRouteGeometryCache(prev => new Map(prev).set(repId, previewData));
+    onRoutePreview(previewData);
   }
 
   async function handleToggleRep(repId: string) {
@@ -1372,11 +1382,13 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
       }
     } catch { /* straight lines */ }
 
-    onRoutePreview({
+    const previewData: RoutePreviewData = {
       anchor: { address: startLoc.address, lat: startLoc.lat, lng: startLoc.lng },
       stops: orderedAppts.map((a, i) => ({ id: i, lat: a.lat!, lng: a.lng!, addresses: [{ address: a.urn ? `${a.urn} — ${a.address}` : a.address }] })),
       geometry,
-    });
+    };
+    setRouteGeometryCache(prev => new Map(prev).set(next, previewData));
+    onRoutePreview(previewData);
   }
 
   if (showRepManager) {
@@ -1799,10 +1811,20 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
                 </svg>
               </button>
               {/* Export */}
-              <button onClick={() => window.print()}
-                className="text-[11px] font-medium px-2 py-1 rounded-md border border-gray-200 text-coal/50 hover:text-coal hover:bg-gray-50 transition-colors flex items-center gap-1">
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 10v3a1 1 0 001 1h8a1 1 0 001-1v-3M8 2v8m0 0L5 7m3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                Export
+              <button
+                onClick={async () => {
+                  setIsPrintLoading(true);
+                  await new Promise(r => setTimeout(r, 2500));
+                  window.print();
+                  setIsPrintLoading(false);
+                }}
+                disabled={isPrintLoading}
+                className="text-[11px] font-medium px-2 py-1 rounded-md border border-gray-200 text-coal/50 hover:text-coal hover:bg-gray-50 transition-colors flex items-center gap-1 disabled:opacity-60"
+              >
+                {isPrintLoading
+                  ? <><div className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin" /> Preparing…</>
+                  : <><svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 10v3a1 1 0 001 1h8a1 1 0 001-1v-3M8 2v8m0 0L5 7m3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>Export</>
+                }
               </button>
             </div>
 
@@ -1815,7 +1837,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
 
             {/* Print portal — rendered on document.body to escape the app layout */}
             {typeof document !== "undefined" && createPortal(
-              <div id="print-portal" style={{ display: "none" }}>
+              <div id="print-portal" style={isPrintLoading ? { display: "block", position: "fixed", left: -9999, top: 0, width: 794, overflowY: "auto" } : { display: "none" }}>
                 {scheduleResult.schedules
                   .filter(s => exportedRepIds.has(s.repId))
                   .map(schedule => {
@@ -1826,12 +1848,24 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
                       const tb = geocodedAppts.find(ap => ap.id === b.apptId);
                       return (ta ? parseHHMM(ta.timeHHMM) : 0) - (tb ? parseHHMM(tb.timeHHMM) : 0);
                     });
+                    const preview = routeGeometryCache.get(schedule.repId);
                     return (
                       <div key={schedule.repId} style={{ pageBreakAfter: "always", padding: "2rem", fontFamily: "sans-serif" }}>
                         <h1 style={{ fontSize: "1.5rem", fontWeight: "bold", marginBottom: "0.25rem" }}>{rep.name}</h1>
-                        <p style={{ fontSize: "0.875rem", color: "#6b7280", marginBottom: "1.5rem" }}>
+                        <p style={{ fontSize: "0.875rem", color: "#6b7280", marginBottom: "1rem" }}>
                           {new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
                         </p>
+                        {/* Route map */}
+                        {preview && (
+                          <div style={{ height: 200, marginBottom: "1.5rem", borderRadius: 8, overflow: "hidden", pageBreakInside: "avoid" }}>
+                            <PrintMapView
+                              anchor={preview.anchor}
+                              stops={preview.stops}
+                              routeGeometry={preview.geometry}
+                              focusedSegmentIdx={null}
+                            />
+                          </div>
+                        )}
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
                           <thead>
                             <tr style={{ borderBottom: "2px solid #d1d5db" }}>

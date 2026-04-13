@@ -49,7 +49,7 @@ export default function SavePlanModal({ type, onSave, onClose }: SavePlanModalPr
   }
 
   const typeLabel = type === "appointments" ? "Appointments" : "Canvass";
-  const typeBadge = type === "appointments" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-800";
+  const typeBadge = type === "appointments" ? "bg-blue-100 text-blue-800" : "bg-purple-100 text-purple-800";
 
   return (
     <div className="fixed inset-0 z-[400] flex items-center justify-center p-4">

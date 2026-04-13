@@ -50,7 +50,7 @@ export default function SharedPlanView({ plan }: { plan: SharedPlan }) {
 
         {/* Plan result */}
         {plan.type === "canvass" ? (
-          <CanvassResultView result={plan.result} />
+          <CanvassResultView result={plan.result} inputs={plan.inputs} />
         ) : (
           <AppointmentsResultView result={plan.result} inputs={plan.inputs} />
         )}
@@ -69,11 +69,34 @@ type RepSnapshot = {
   homeLng?: number | null;
 };
 
+type CanvasserSnapshot = {
+  id: string;
+  name: string;
+  homeAddress: string;
+  homeLat: number | null;
+  homeLng: number | null;
+  startAddress: string;
+  startLat: number | null;
+  startLng: number | null;
+  startLabel: string;
+  endAddress: string;
+  endLat: number | null;
+  endLng: number | null;
+  endLabel: string;
+};
+
 type GeoAppt = {
   id: string;
   address: string;
   timeHHMM: string;
   urn?: string;
+  lat?: number;
+  lng?: number;
+};
+
+type GeoAddr = {
+  id: string;
+  address: string;
   lat?: number;
   lng?: number;
 };
@@ -310,17 +333,125 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
 
 // ── Canvass result view ────────────────────────────────────────────────────────
 
-function CanvassResultView({ result }: { result: Record<string, unknown> }) {
-  const days = (result.days as Array<{
+function CanvassResultView({ result, inputs }: { result: Record<string, unknown>; inputs: Record<string, unknown> }) {
+  type DayPlan = {
     date: string;
     routes: Array<{
       canvasserId: string;
       stops: Array<{ addressIds: string[]; travelSec: number }>;
     }>;
-  }>) ?? [];
+  };
 
-  const geocodedAddresses = (result.geocodedAddresses as Array<{ id: string; address: string }>) ?? [];
-  const addrById = new Map(geocodedAddresses.map((a) => [a.id, a.address]));
+  const days = (result.days as DayPlan[]) ?? [];
+  const geocodedAddresses = (result.geocodedAddresses as GeoAddr[]) ?? [];
+  const addrById = new Map(geocodedAddresses.map((a) => [a.id, a]));
+  const durationMins = (inputs.durationMins as number) ?? 20;
+
+  // Prefer canvasser snapshot saved with the plan; fall back to fetching current canvassers
+  const savedCanvassers = (inputs.canvassers as CanvasserSnapshot[] | undefined) ?? [];
+  const [fetchedCanvassers, setFetchedCanvassers] = useState<CanvasserSnapshot[]>([]);
+
+  useEffect(() => {
+    if (savedCanvassers.length > 0) return;
+    fetch("/api/canvassers")
+      .then((r) => r.json())
+      .then((data: unknown) => {
+        if (Array.isArray(data)) {
+          setFetchedCanvassers(
+            (data as Record<string, unknown>[]).map((c) => ({
+              id:           String(c.id ?? ""),
+              name:         String(c.name ?? ""),
+              homeAddress:  String(c.homeAddress ?? ""),
+              homeLat:      typeof c.homeLat === "number" ? c.homeLat : null,
+              homeLng:      typeof c.homeLng === "number" ? c.homeLng : null,
+              startAddress: String(c.homeAddress ?? ""),
+              startLat:     typeof c.homeLat === "number" ? c.homeLat : null,
+              startLng:     typeof c.homeLng === "number" ? c.homeLng : null,
+              startLabel:   "Home",
+              endAddress:   String(c.homeAddress ?? ""),
+              endLat:       typeof c.homeLat === "number" ? c.homeLat : null,
+              endLng:       typeof c.homeLng === "number" ? c.homeLng : null,
+              endLabel:     "Home",
+            }))
+          );
+        }
+      })
+      .catch(() => { /* no-op */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const canvassers = savedCanvassers.length > 0 ? savedCanvassers : fetchedCanvassers;
+  const canvasserById = new Map(canvassers.map((c) => [c.id, c]));
+
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [focusedStepIdx, setFocusedStepIdx] = useState<number | null>(null);
+  const [routePreviews, setRoutePreviews] = useState<Map<string, RoutePreview | null>>(new Map());
+  const [loadingKey, setLoadingKey] = useState<string | null>(null);
+
+  async function handleToggleCanvasser(canvasserId: string, date: string) {
+    const key = `${canvasserId}:${date}`;
+    const next = expandedKey === key ? null : key;
+    setExpandedKey(next);
+    setFocusedStepIdx(null);
+    if (!next) return;
+
+    if (routePreviews.has(key)) return;
+
+    const canvasser = canvasserById.get(canvasserId);
+    if (!canvasser?.startLat || !canvasser?.startLng) {
+      setRoutePreviews((prev) => new Map(prev).set(key, null));
+      return;
+    }
+
+    const day = days.find((d) => d.date === date);
+    const route = day?.routes.find((r) => r.canvasserId === canvasserId);
+    if (!route || route.stops.length === 0) {
+      setRoutePreviews((prev) => new Map(prev).set(key, null));
+      return;
+    }
+
+    const orderedStops = route.stops.map((s) => {
+      const firstAddr = s.addressIds.map((id) => addrById.get(id)).find(
+        (a): a is GeoAddr => !!a && a.lat != null && a.lng != null
+      );
+      if (!firstAddr) return null;
+      const allAddrs = s.addressIds.map((id) => addrById.get(id)).filter(Boolean) as GeoAddr[];
+      return { lat: firstAddr.lat!, lng: firstAddr.lng!, addresses: allAddrs.map((a) => ({ address: a.address })) };
+    }).filter((s): s is NonNullable<typeof s> => s !== null);
+
+    if (orderedStops.length === 0) {
+      setRoutePreviews((prev) => new Map(prev).set(key, null));
+      return;
+    }
+
+    setLoadingKey(key);
+
+    const endLat = canvasser.endLat ?? canvasser.startLat;
+    const endLng = canvasser.endLng ?? canvasser.startLng;
+    const waypoints = [
+      { lat: canvasser.startLat, lng: canvasser.startLng },
+      ...orderedStops,
+      { lat: endLat, lng: endLng },
+    ];
+    const coords = waypoints.map((w) => `${w.lng},${w.lat}`).join(";");
+    let geometry: [number, number][] | null = null;
+    try {
+      const res = await fetch(
+        `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`
+      );
+      const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
+      if (data.routes?.[0]?.geometry?.coordinates) {
+        geometry = data.routes[0].geometry.coordinates.map(
+          ([lng, lat]: [number, number]) => [lat, lng] as [number, number]
+        );
+      }
+    } catch { /* fall back to straight lines */ }
+
+    const anchor = { address: canvasser.startAddress, lat: canvasser.startLat, lng: canvasser.startLng };
+    const stops = orderedStops.map((s, i) => ({ id: i + 1, lat: s.lat, lng: s.lng, addresses: s.addresses }));
+    setRoutePreviews((prev) => new Map(prev).set(key, { anchor, stops, geometry }));
+    setLoadingKey(null);
+  }
 
   if (days.length === 0) {
     return <p className="text-sm text-coal/50 text-center py-8">No canvass plan data available.</p>;
@@ -336,31 +467,131 @@ function CanvassResultView({ result }: { result: Record<string, unknown> }) {
           (n, r) => n + r.stops.reduce((m, s) => m + s.addressIds.length, 0), 0
         );
         return (
-          <div key={day.date} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
-              <p className="text-sm font-semibold text-coal">{dateLabel}</p>
-              <p className="text-xs text-coal/50 mt-0.5">
-                {day.routes.length} canvasser{day.routes.length !== 1 ? "s" : ""} · {totalAddresses} addresses
-              </p>
+          <div key={day.date} className="space-y-3">
+            {/* Day header */}
+            <div className="px-1">
+              <p className="text-xs font-semibold text-coal/60 uppercase tracking-widest">{dateLabel}</p>
+              <p className="text-xs text-coal/40 mt-0.5">{day.routes.length} canvasser{day.routes.length !== 1 ? "s" : ""} · {totalAddresses} addresses</p>
             </div>
+
+            {/* Canvasser rows */}
             {day.routes.map((route) => {
+              const key = `${route.canvasserId}:${day.date}`;
+              const canvasser = canvasserById.get(route.canvasserId);
+              const canvasserName = canvasser?.name ?? route.canvasserId;
+              const isExpanded = expandedKey === key;
+              const preview = routePreviews.get(key);
+              const isLoading = loadingKey === key;
               const totalAddrs = route.stops.reduce((n, s) => n + s.addressIds.length, 0);
+
               return (
-                <div key={route.canvasserId} className="border-t border-gray-100 px-4 py-3">
-                  <p className="text-sm font-semibold text-coal mb-2">{totalAddrs} addresses</p>
-                  <ol className="space-y-1">
-                    {route.stops.map((stop, idx) => {
-                      const addrs = stop.addressIds.map((id) => addrById.get(id) ?? id);
-                      return (
-                        <li key={idx} className="flex gap-2 text-xs">
-                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-loch/10 text-loch font-semibold flex items-center justify-center text-[10px]">
-                            {idx + 1}
-                          </span>
-                          <div>{addrs.map((a, i) => <p key={i} className="text-coal/70">{a}</p>)}</div>
-                        </li>
-                      );
-                    })}
-                  </ol>
+                <div key={key} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  {/* Canvasser header */}
+                  <button
+                    className="w-full text-left px-4 py-3 bg-gray-50 border-b border-gray-100 hover:bg-gray-100 transition-colors flex items-center justify-between gap-2"
+                    onClick={() => handleToggleCanvasser(route.canvasserId, day.date)}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-coal">{canvasserName}</p>
+                      <p className="text-xs text-coal/50 mt-0.5">
+                        {totalAddrs} address{totalAddrs !== 1 ? "es" : ""} · {route.stops.length} stop{route.stops.length !== 1 ? "s" : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {isLoading && (
+                        <div className="w-4 h-4 border-2 border-loch border-t-transparent rounded-full animate-spin" />
+                      )}
+                      <svg
+                        width="14" height="14" viewBox="0 0 16 16" fill="none"
+                        className={`text-coal/40 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                      >
+                        <path d="M3 6l5 5 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+                  </button>
+
+                  {isExpanded && (
+                    <>
+                      {/* Map */}
+                      {preview && (
+                        <div className="h-56 border-b border-gray-100">
+                          <MapView
+                            anchor={preview.anchor}
+                            stops={preview.stops}
+                            routeGeometry={preview.geometry}
+                            focusedSegmentIdx={focusedStepIdx}
+                          />
+                        </div>
+                      )}
+                      {!preview && !isLoading && canvasser?.startLat && (
+                        <div className="h-12 flex items-center justify-center text-xs text-coal/40 border-b border-gray-100">
+                          No map data available for this route.
+                        </div>
+                      )}
+
+                      {/* Route steps */}
+                      <ol className="divide-y divide-gray-50">
+                        {/* Start row */}
+                        {canvasser && (
+                          <li className="flex items-start gap-3 px-4 py-3 border-b border-gray-50">
+                            <span className="flex-shrink-0 w-7 h-7 rounded-full bg-map-anchor text-white text-xs font-bold flex items-center justify-center mt-0.5">S</span>
+                            <div>
+                              <p className="text-xs font-semibold text-loch uppercase tracking-wide">Start</p>
+                              <p className="text-sm font-semibold text-coal mt-0.5">{canvasser.startLabel}</p>
+                              <p className="text-xs text-coal/50">{canvasser.startAddress}</p>
+                            </div>
+                          </li>
+                        )}
+
+                        {/* Stop rows */}
+                        {route.stops.map((stop, idx) => {
+                          const stopAddrs = stop.addressIds.map((id) => addrById.get(id)).filter(Boolean) as GeoAddr[];
+                          const doorMins = durationMins * stop.addressIds.length;
+                          const isFocused = focusedStepIdx === idx;
+                          return (
+                            <li
+                              key={stop.addressIds[0] ?? idx}
+                              onClick={() => setFocusedStepIdx(focusedStepIdx === idx ? null : idx)}
+                              className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors ${isFocused ? "ring-2 ring-inset ring-loch/40 bg-loch/5" : "hover:bg-gray-50"}`}
+                            >
+                              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-loch text-white text-xs font-bold flex items-center justify-center mt-0.5">
+                                {idx + 1}
+                              </span>
+                              <div>
+                                {stop.travelSec > 0 && (
+                                  <p className="text-xs text-green-600 mb-0.5">↓ ~{Math.round(stop.travelSec / 60)}m travel</p>
+                                )}
+                                {stopAddrs.length > 0 ? (
+                                  <div>
+                                    {stopAddrs.map((a, i) => (
+                                      <p key={i} className="text-sm font-semibold text-coal">{a.address}</p>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-sm font-semibold text-coal">{stop.addressIds[0]}</p>
+                                )}
+                                {doorMins > 0 && (
+                                  <p className="text-xs text-coal/50 mt-0.5">Approx {doorMins} min{doorMins === 1 ? "" : "s"} at door</p>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        })}
+
+                        {/* End row */}
+                        {canvasser && (
+                          <li className="flex items-start gap-3 px-4 py-3">
+                            <span className="flex-shrink-0 w-7 h-7 rounded-full bg-map-anchor text-white text-xs font-bold flex items-center justify-center mt-0.5">E</span>
+                            <div>
+                              <p className="text-xs font-semibold text-loch uppercase tracking-wide">End</p>
+                              <p className="text-sm font-semibold text-coal mt-0.5">{canvasser.endLabel}</p>
+                              <p className="text-xs text-coal/50">{canvasser.endAddress}</p>
+                            </div>
+                          </li>
+                        )}
+                      </ol>
+                    </>
+                  )}
                 </div>
               );
             })}
