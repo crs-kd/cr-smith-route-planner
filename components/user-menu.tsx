@@ -12,6 +12,7 @@ interface UserMenuProps {
 
 export default function UserMenu({ onManageUsers, onSettings }: UserMenuProps) {
   const { session, loading, refresh } = useSession();
+  const [{ pillStyles }] = useUISettings();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -45,8 +46,6 @@ export default function UserMenu({ onManageUsers, onSettings }: UserMenuProps) {
     .join("")
     .toUpperCase()
     .slice(0, 2);
-
-  const [{ pillStyles }] = useUISettings();
 
   return (
     <div ref={ref} className="relative">
