@@ -21,3 +21,16 @@ export async function GET() {
     return NextResponse.json({ error: "Failed to fetch audit log" }, { status: 500 });
   }
 }
+
+export async function DELETE() {
+  try {
+    const session = await requireAdmin();
+    void session;
+
+    await sql`DELETE FROM audit_log`;
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    if (e instanceof NextResponse) return e;
+    return NextResponse.json({ error: "Failed to clear audit log" }, { status: 500 });
+  }
+}

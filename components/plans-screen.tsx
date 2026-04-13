@@ -26,11 +26,12 @@ interface AuditEntry {
 }
 
 type FilterType = "all" | "appointments" | "canvass";
+type SortBy = "newest" | "oldest" | "name";
 type ActiveTab = "plans" | "audit";
 
 const TYPE_BADGE: Record<string, string> = {
   appointments: "bg-blue-100 text-blue-800",
-  canvass:      "bg-amber-100 text-amber-800",
+  canvass:      "bg-purple-100 text-purple-800",
 };
 
 const VIS_BADGE: Record<string, string> = {
@@ -63,6 +64,7 @@ export default function PlansScreen() {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>("all");
+  const [sortBy, setSortBy] = useState<SortBy>("newest");
   const [activeTab, setActiveTab] = useState<ActiveTab>("plans");
   const [copyId, setCopyId] = useState<string | null>(null);
 
@@ -110,7 +112,23 @@ export default function PlansScreen() {
     setTimeout(() => setCopyId(null), 2000);
   }
 
+  async function deleteAuditEntry(id: string) {
+    await fetch(`/api/audit/${id}`, { method: "DELETE" });
+    setAudit((prev) => prev.filter((e) => e.id !== id));
+  }
+
+  async function clearAuditLog() {
+    if (!confirm("Clear all audit log entries?")) return;
+    await fetch("/api/audit", { method: "DELETE" });
+    setAudit([]);
+  }
+
   const filtered = plans.filter((p) => filter === "all" || p.type === filter);
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === "oldest") return +new Date(a.created_at) - +new Date(b.created_at);
+    if (sortBy === "name")   return a.name.localeCompare(b.name);
+    return +new Date(b.created_at) - +new Date(a.created_at);
+  });
 
   function formatDate(iso: string) {
     return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -157,8 +175,8 @@ export default function PlansScreen() {
 
         {activeTab === "plans" && (
           <>
-            {/* Filters */}
-            <div className="flex gap-2 mb-5">
+            {/* Filters + Sort */}
+            <div className="flex items-center gap-2 mb-5 flex-wrap">
               {(["all", "appointments", "canvass"] as const).map((f) => (
                 <button
                   key={f}
@@ -171,12 +189,23 @@ export default function PlansScreen() {
                   )}
                 </button>
               ))}
+              <div className="flex-1" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortBy)}
+                className="text-xs text-coal/60 bg-white border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-loch/20 cursor-pointer"
+                aria-label="Sort plans"
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="name">Name A–Z</option>
+              </select>
             </div>
 
             {/* Plan cards */}
             {loading ? (
               <div className="text-sm text-coal/40 text-center py-16">Loading…</div>
-            ) : filtered.length === 0 ? (
+            ) : sorted.length === 0 ? (
               <div className="text-center py-16">
                 <svg className="mx-auto w-10 h-10 text-coal/20 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
@@ -188,7 +217,7 @@ export default function PlansScreen() {
               </div>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
-                {filtered.map((plan) => (
+                {sorted.map((plan) => (
                   <div key={plan.id} className="bg-white border border-gray-200 rounded-xl p-4 flex flex-col gap-2.5 hover:border-loch/30 hover:shadow-sm transition-all">
                     {/* Top row */}
                     <div className="flex items-start justify-between gap-2">
@@ -255,22 +284,37 @@ export default function PlansScreen() {
 
         {activeTab === "audit" && session?.role === "admin" && (
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            {/* Audit header with clear all */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+              <p className="text-xs font-semibold text-coal/50 uppercase tracking-wide">
+                {audit.length > 0 ? `${audit.length} entr${audit.length === 1 ? "y" : "ies"}` : "Audit Log"}
+              </p>
+              {audit.length > 0 && (
+                <button
+                  onClick={clearAuditLog}
+                  className="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-300 px-2.5 py-1 rounded-lg transition-colors"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50">
+                  <tr className="border-b border-gray-100">
                     <th className="text-left px-4 py-3 text-xs font-semibold text-coal/50 uppercase tracking-wide">Time</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-coal/50 uppercase tracking-wide">User</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-coal/50 uppercase tracking-wide">Action</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-coal/50 uppercase tracking-wide">Resource</th>
+                    <th className="w-10" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {audit.length === 0 ? (
-                    <tr><td colSpan={4} className="text-center py-8 text-coal/40 text-sm">No audit entries yet.</td></tr>
+                    <tr><td colSpan={5} className="text-center py-8 text-coal/40 text-sm">No audit entries yet.</td></tr>
                   ) : (
                     audit.map((entry) => (
-                      <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
+                      <tr key={entry.id} className="hover:bg-gray-50 transition-colors group">
                         <td className="px-4 py-2.5 text-xs text-coal/50 whitespace-nowrap">
                           {new Date(entry.created_at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
                         </td>
@@ -279,6 +323,15 @@ export default function PlansScreen() {
                           <span className="font-medium text-coal">{ACTION_LABEL[entry.action] ?? entry.action}</span>
                         </td>
                         <td className="px-4 py-2.5 text-xs text-coal/60">{entry.resource_name ?? "—"}</td>
+                        <td className="px-4 py-2.5">
+                          <button
+                            onClick={() => deleteAuditEntry(entry.id)}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-coal/30 hover:text-red-500 hover:bg-red-50 rounded transition-all"
+                            aria-label="Delete entry"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2h4v2M5 4v8a1 1 0 001 1h4a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
