@@ -164,6 +164,7 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
   const reps = savedReps.length > 0 ? savedReps : fetchedReps;
   const repById = new Map(reps.map((r) => [r.id, r]));
 
+  const [sortBy, setSortBy] = useState<"name" | "appointments" | "travel">("name");
   const [expandedRepId, setExpandedRepId] = useState<string | null>(null);
   // Per-rep focused step: keyed by repId so each rep has its own highlight state
   const [focusedSteps, setFocusedSteps] = useState<Record<string, number | null>>({});
@@ -252,9 +253,39 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
     return <p className="text-sm text-coal/50 text-center py-8">No appointments plan data available.</p>;
   }
 
+  // Sort the rep schedule list — mirrors the planner's sort controls
+  const sortedSchedules = [...schedules].sort((a, b) => {
+    if (sortBy === "appointments") return b.assignments.length - a.assignments.length;
+    if (sortBy === "travel") {
+      const tA = a.assignments.reduce((s, x) => s + x.travelSec, 0);
+      const tB = b.assignments.reduce((s, x) => s + x.travelSec, 0);
+      return tB - tA;
+    }
+    // name (default) — alphabetical A–Z
+    const rA = repById.get(a.repId)?.name ?? a.repId;
+    const rB = repById.get(b.repId)?.name ?? b.repId;
+    return rA.localeCompare(rB);
+  });
+
   return (
     <div className="space-y-3">
-      {schedules.map((sched) => {
+      {/* Sort controls — matching the planner */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-coal/40 mr-1">Sort</span>
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+          {(["name", "appointments", "travel"] as const).map((opt) => (
+            <button
+              key={opt}
+              onClick={() => setSortBy(opt)}
+              className={`px-3 py-1.5 font-medium transition-colors ${sortBy === opt ? "bg-loch text-white" : "text-coal/50 hover:text-coal hover:bg-gray-50"}`}
+            >
+              {opt === "name" ? "A–Z" : opt === "appointments" ? "Appts" : "Travel"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {sortedSchedules.map((sched) => {
         const rep = repById.get(sched.repId);
         const repName = rep?.name ?? sched.repId;
         const isExpanded = expandedRepId === sched.repId;
