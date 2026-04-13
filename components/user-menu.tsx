@@ -3,12 +3,14 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/auth-context";
+import { useUISettings, pillStyle } from "@/lib/ui-settings";
 
 interface UserMenuProps {
   onManageUsers: () => void;
+  onSettings: () => void;
 }
 
-export default function UserMenu({ onManageUsers }: UserMenuProps) {
+export default function UserMenu({ onManageUsers, onSettings }: UserMenuProps) {
   const { session, loading, refresh } = useSession();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -44,11 +46,7 @@ export default function UserMenu({ onManageUsers }: UserMenuProps) {
     .toUpperCase()
     .slice(0, 2);
 
-  const ROLE_BADGE: Record<string, string> = {
-    admin:  "bg-green-100 text-green-800",
-    editor: "bg-blue-100 text-blue-800",
-    viewer: "bg-gray-100 text-gray-700",
-  };
+  const [{ pillStyles }] = useUISettings();
 
   return (
     <div ref={ref} className="relative">
@@ -68,7 +66,7 @@ export default function UserMenu({ onManageUsers }: UserMenuProps) {
           <div className="px-4 py-3 border-b border-gray-100">
             <p className="text-sm font-semibold text-coal truncate">{session.name}</p>
             <p className="text-xs text-coal/50 truncate">{session.email}</p>
-            <span className={`inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${ROLE_BADGE[session.role] ?? ROLE_BADGE.viewer}`}>
+            <span className="inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={pillStyle(pillStyles[session.role as keyof typeof pillStyles] ?? pillStyles.viewer)}>
               {session.role}
             </span>
           </div>
@@ -100,6 +98,19 @@ export default function UserMenu({ onManageUsers }: UserMenuProps) {
                   <path d="M11 9v4M9 11h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
                 </svg>
                 Manage Users
+              </button>
+            )}
+
+            {(session.role === "admin" || session.role === "editor") && (
+              <button
+                onClick={() => { setOpen(false); onSettings(); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-coal/70 hover:bg-gray-50 hover:text-coal transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.4"/>
+                  <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.22 3.22l1.42 1.42M11.36 11.36l1.42 1.42M3.22 12.78l1.42-1.42M11.36 4.64l1.42-1.42" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
+                Settings
               </button>
             )}
 

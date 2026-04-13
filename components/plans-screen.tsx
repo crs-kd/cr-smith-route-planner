@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "@/lib/auth-context";
+import { useUISettings, pillStyle } from "@/lib/ui-settings";
 
 interface Plan {
   id: string;
@@ -29,16 +30,6 @@ type FilterType = "all" | "appointments" | "canvass";
 type SortBy = "newest" | "oldest" | "name";
 type ActiveTab = "plans" | "audit";
 
-const TYPE_BADGE: Record<string, string> = {
-  appointments: "bg-blue-100 text-blue-800",
-  canvass:      "bg-purple-100 text-purple-800",
-};
-
-const VIS_BADGE: Record<string, string> = {
-  private: "bg-gray-100 text-gray-600",
-  shared:  "bg-green-100 text-green-700",
-  link:    "bg-purple-100 text-purple-700",
-};
 
 const VIS_LABEL: Record<string, string> = {
   private: "Private",
@@ -60,6 +51,7 @@ const ACTION_LABEL: Record<string, string> = {
 
 export default function PlansScreen() {
   const { session } = useSession();
+  const [{ pillStyles }] = useUISettings();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -224,10 +216,16 @@ export default function PlansScreen() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-coal truncate">{plan.name}</p>
                         <div className="flex gap-1.5 mt-1 flex-wrap">
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase ${TYPE_BADGE[plan.type]}`}>
+                          <span
+                            className="text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase"
+                            style={pillStyle(pillStyles[plan.type])}
+                          >
                             {plan.type}
                           </span>
-                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase ${VIS_BADGE[plan.visibility]}`}>
+                          <span
+                            className="text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase"
+                            style={pillStyle(pillStyles[plan.visibility])}
+                          >
                             {VIS_LABEL[plan.visibility]}
                           </span>
                         </div>

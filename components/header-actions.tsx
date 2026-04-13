@@ -5,10 +5,12 @@ import { usePathname } from "next/navigation";
 import { useSession } from "@/lib/auth-context";
 import UserMenu from "@/components/user-menu";
 import AdminPanel from "@/components/admin-panel";
+import SettingsPanel from "@/components/settings-panel";
 
 export default function HeaderActions() {
   const { session } = useSession();
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const pathname = usePathname();
 
   const onPlansPage = pathname === "/plans" || pathname.startsWith("/plans/");
@@ -43,9 +45,10 @@ export default function HeaderActions() {
         </a>
       )}
 
-      <UserMenu onManageUsers={() => setShowAdmin(true)} />
+      <UserMenu onManageUsers={() => setShowAdmin(true)} onSettings={() => setShowSettings(true)} />
 
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

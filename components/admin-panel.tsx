@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useUISettings, pillStyle } from "@/lib/ui-settings";
 
 interface User {
   id: string;
@@ -27,11 +28,6 @@ const TAB_OPTIONS = [
   { value: "canvass", label: "Canvass" },
 ];
 
-const ROLE_COLOUR: Record<string, string> = {
-  admin:  "bg-green-100 text-green-800",
-  editor: "bg-blue-100 text-blue-800",
-  viewer: "bg-gray-100 text-gray-700",
-};
 
 interface AdminPanelProps {
   onClose: () => void;
@@ -39,6 +35,7 @@ interface AdminPanelProps {
 
 export default function AdminPanel({ onClose }: AdminPanelProps) {
   const [users, setUsers] = useState<User[]>([]);
+  const [{ pillStyles }] = useUISettings();
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [form, setForm] = useState<UserForm>(DEFAULT_FORM);
@@ -226,7 +223,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold text-coal">{user.name}</p>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase ${ROLE_COLOUR[user.role]}`}>{user.role}</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase" style={pillStyle(pillStyles[user.role])}>{user.role}</span>
                       {!user.is_active && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 uppercase">inactive</span>}
                     </div>
                     <p className="text-xs text-coal/50 truncate">{user.email}</p>

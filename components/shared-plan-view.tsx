@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
+import { useUISettings, pillStyle } from "@/lib/ui-settings";
 
 // Leaflet MapView — no SSR
 const MapView = dynamic(() => import("./map-view"), {
@@ -25,8 +26,8 @@ interface SharedPlan {
 }
 
 export default function SharedPlanView({ plan }: { plan: SharedPlan }) {
+  const [{ pillStyles }] = useUISettings();
   const typeLabel = plan.type === "appointments" ? "Appointments" : "Canvass";
-  const typeBadge = plan.type === "appointments" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-800";
 
   const dateLabel = new Date(plan.created_at).toLocaleDateString("en-GB", {
     weekday: "long", day: "numeric", month: "long", year: "numeric",
@@ -37,7 +38,7 @@ export default function SharedPlanView({ plan }: { plan: SharedPlan }) {
       <div className="max-w-3xl mx-auto px-4 py-8">
         {/* Plan header */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6">
-          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide ${typeBadge}`}>
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide" style={pillStyle(pillStyles[plan.type])}>
             {typeLabel}
           </span>
           <h1 className="text-xl font-bold text-coal mt-2">{plan.name}</h1>

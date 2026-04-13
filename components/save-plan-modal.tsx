@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useUISettings, pillStyle } from "@/lib/ui-settings";
 
 interface SavePlanModalProps {
   type: "appointments" | "canvass";
@@ -9,6 +10,7 @@ interface SavePlanModalProps {
 }
 
 export default function SavePlanModal({ type, onSave, onClose }: SavePlanModalProps) {
+  const [{ pillStyles }] = useUISettings();
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
   const [visibility, setVisibility] = useState<"private" | "shared" | "link">("private");
@@ -49,7 +51,6 @@ export default function SavePlanModal({ type, onSave, onClose }: SavePlanModalPr
   }
 
   const typeLabel = type === "appointments" ? "Appointments" : "Canvass";
-  const typeBadge = type === "appointments" ? "bg-blue-100 text-blue-800" : "bg-purple-100 text-purple-800";
 
   return (
     <div className="fixed inset-0 z-[400] flex items-center justify-center p-4">
@@ -62,7 +63,7 @@ export default function SavePlanModal({ type, onSave, onClose }: SavePlanModalPr
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-coal">Save Plan</h2>
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide mt-1 inline-block ${typeBadge}`}>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide mt-1 inline-block" style={pillStyle(pillStyles[type])}>
                 {typeLabel}
               </span>
             </div>
