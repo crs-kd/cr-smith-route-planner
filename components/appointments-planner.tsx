@@ -55,6 +55,7 @@ interface RoutePreviewData {
 
 interface AppointmentsPlannerProps {
   onRoutePreview: (data: RoutePreviewData | null) => void;
+  onFocusSegment?: (idx: number | null) => void;
   onResultReady?: (inputs: Record<string, unknown>, result: Record<string, unknown>) => void;
 }
 
@@ -993,7 +994,7 @@ function RepManager({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function AppointmentsPlanner({ onRoutePreview, onResultReady }: AppointmentsPlannerProps) {
+export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, onResultReady }: AppointmentsPlannerProps) {
   const [reps, setRepsState] = useState<Rep[]>([]);
   const [repSaveError, setRepSaveError] = useState<string | null>(null);
 
@@ -1065,6 +1066,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onResultReady }: A
   const [geocodedAppts, setGeocodedAppts] = useState<ApptInput[]>([]);
   const [geocodeFailedAddresses, setGeocodeFailedAddresses] = useState<Set<string>>(new Set());
   const [expandedRepId, setExpandedRepId] = useState<string | null>(null);
+  const [focusedStepIdx, setFocusedStepIdx] = useState<number | null>(null);
   const [flashRepId, setFlashRepId] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"name" | "appointments" | "travel">("name");
   const [groupByArea, setGroupByArea] = useState(false);
@@ -1336,6 +1338,8 @@ export default function AppointmentsPlanner({ onRoutePreview, onResultReady }: A
   async function handleToggleRep(repId: string) {
     const next = expandedRepId === repId ? null : repId;
     setExpandedRepId(next);
+    setFocusedStepIdx(null);
+    onFocusSegment?.(null);
     if (!next || !scheduleResult) { onRoutePreview(null); return; }
 
     const rep      = reps.find((r) => r.id === next);
@@ -1726,6 +1730,12 @@ export default function AppointmentsPlanner({ onRoutePreview, onResultReady }: A
                     schedule={schedule} rep={rep}
                     geocodedAppts={geocodedAppts} durationHours={durationHours}
                     workingReps={workingReps} bases={bases} onReassign={reassignAppt}
+                    focusedStepIdx={isExpanded && expandedRepId === rep.id ? focusedStepIdx : null}
+                    onStepClick={(idx) => {
+                      const next = focusedStepIdx === idx ? null : idx;
+                      setFocusedStepIdx(next);
+                      onFocusSegment?.(next);
+                    }}
                   />
                 </div>
               )}
@@ -1878,6 +1888,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onResultReady }: A
 
 function RepRouteList({
   schedule, rep, geocodedAppts, durationHours, workingReps, bases, onReassign,
+  focusedStepIdx, onStepClick,
 }: {
   schedule: import("@/lib/appt-scheduler").RepSchedule;
   rep: Rep;
@@ -1886,6 +1897,8 @@ function RepRouteList({
   workingReps: Rep[];
   bases: SalesBase[];
   onReassign: (apptId: string, fromRepId: string | null, toRepId: string | null) => void;
+  focusedStepIdx?: number | null;
+  onStepClick?: (idx: number) => void;
 }) {
   const customTags = useCustomTags();
   const sortedAssignments = [...schedule.assignments].sort((a, b) => {
@@ -1920,10 +1933,12 @@ function RepRouteList({
         if (!appt) return null;
         const conflict    = conflictLabel(assignment.status);
         const endTimeMins = parseHHMM(appt.timeHHMM) + durationHours * 60;
+        const isFocused   = focusedStepIdx === idx;
 
         return (
           <li key={assignment.apptId}
-            className={`${rowBase} last:border-b-0 ${STATUS_BG[assignment.status]}`}>
+            onClick={() => onStepClick?.(idx)}
+            className={`${rowBase} last:border-b-0 ${STATUS_BG[assignment.status]} ${onStepClick ? "cursor-pointer" : ""} ${isFocused ? "ring-2 ring-inset ring-loch/40 bg-loch/5" : ""}`}>
             <span className="flex-shrink-0 w-7 h-7 rounded-full bg-loch text-white text-xs font-bold flex items-center justify-center mt-0.5">
               {idx + 1}
             </span>

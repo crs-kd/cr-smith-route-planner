@@ -125,12 +125,14 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
   const repById = new Map(reps.map((r) => [r.id, r]));
 
   const [expandedRepId, setExpandedRepId] = useState<string | null>(null);
+  const [focusedStepIdx, setFocusedStepIdx] = useState<number | null>(null);
   const [routePreviews, setRoutePreviews] = useState<Map<string, RoutePreview | null>>(new Map());
   const [loadingRepId, setLoadingRepId] = useState<string | null>(null);
 
   async function handleToggleRep(repId: string) {
     const next = expandedRepId === repId ? null : repId;
     setExpandedRepId(next);
+    setFocusedStepIdx(null);
     if (!next) return;
 
     // Already fetched — don't re-fetch
@@ -254,7 +256,7 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
                       anchor={preview.anchor}
                       stops={preview.stops}
                       routeGeometry={preview.geometry}
-                      focusedSegmentIdx={null}
+                      focusedSegmentIdx={focusedStepIdx}
                     />
                   </div>
                 )}
@@ -275,8 +277,13 @@ function AppointmentsResultView({ result, inputs }: { result: Record<string, unk
                       durationHours * 60;
                     const endH = String(Math.floor(endMins / 60) % 24).padStart(2, "0");
                     const endM = String(endMins % 60).padStart(2, "0");
+                    const isFocused = focusedStepIdx === idx;
                     return (
-                      <li key={a.apptId} className="flex items-start gap-3 px-4 py-3">
+                      <li
+                        key={a.apptId}
+                        onClick={() => setFocusedStepIdx(focusedStepIdx === idx ? null : idx)}
+                        className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors ${isFocused ? "ring-2 ring-inset ring-loch/40 bg-loch/5" : "hover:bg-gray-50"}`}
+                      >
                         <span className="flex-shrink-0 w-7 h-7 rounded-full bg-loch text-white text-xs font-bold flex items-center justify-center mt-0.5">
                           {idx + 1}
                         </span>

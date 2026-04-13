@@ -44,6 +44,7 @@ export default function RoutePlanner() {
   const [isDesktop, setIsDesktop] = useState(false);
   const [enableTransition, setEnableTransition] = useState(false);
   const [routePreview, setRoutePreview] = useState<RoutePreviewData | null>(null);
+  const [focusedSegmentIdx, setFocusedSegmentIdx] = useState<number | null>(null);
   const [pendingSave, setPendingSave] = useState<PendingSave | null>(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
 
@@ -176,16 +177,24 @@ export default function RoutePlanner() {
           {canSeeAppointments && (
             <div className={mode === "appointments" ? "" : "hidden"}>
               <AppointmentsPlanner
-                onRoutePreview={setRoutePreview}
-                onResultReady={canSave ? (inputs, result) => setPendingSave({ type: "appointments", inputs, result }) : undefined}
+                onRoutePreview={(data) => { setRoutePreview(data); if (!data) setFocusedSegmentIdx(null); }}
+                onFocusSegment={setFocusedSegmentIdx}
+                onResultReady={canSave ? (inputs, result) => {
+                  setPendingSave({ type: "appointments", inputs, result });
+                  setShowSaveModal(true);
+                } : undefined}
               />
             </div>
           )}
           {canSeeCanvass && (
             <div className={mode === "canvass" ? "" : "hidden"}>
               <CanvassPlanner
-                onRoutePreview={setRoutePreview}
-                onResultReady={canSave ? (inputs, result) => setPendingSave({ type: "canvass", inputs, result }) : undefined}
+                onRoutePreview={(data) => { setRoutePreview(data); if (!data) setFocusedSegmentIdx(null); }}
+                onFocusSegment={setFocusedSegmentIdx}
+                onResultReady={canSave ? (inputs, result) => {
+                  setPendingSave({ type: "canvass", inputs, result });
+                  setShowSaveModal(true);
+                } : undefined}
               />
             </div>
           )}
@@ -202,7 +211,7 @@ export default function RoutePlanner() {
             anchor={routePreview.anchor}
             stops={routePreview.stops}
             routeGeometry={routePreview.geometry}
-            focusedSegmentIdx={null}
+            focusedSegmentIdx={focusedSegmentIdx}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">

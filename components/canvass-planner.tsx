@@ -41,6 +41,7 @@ interface RoutePreviewData {
 
 interface CanvassPlannerProps {
   onRoutePreview: (data: RoutePreviewData | null) => void;
+  onFocusSegment?: (idx: number | null) => void;
   onResultReady?: (inputs: Record<string, unknown>, result: Record<string, unknown>) => void;
 }
 
@@ -612,17 +613,23 @@ function CanvasserManager({
 // ── Day accordion card ────────────────────────────────────────────────────────
 
 function DayCard({
-  dayPlan, canvassers, addresses, expandedCanvasserId, onToggleCanvasser,
-  durationMins, exportedKeys, onToggleExport,
+  dayPlan, canvassers, addresses, bases, expandedCanvasserId, onToggleCanvasser,
+  durationMins, exportedKeys, onToggleExport, focusedKey, focusedStepIdx, onFocusStep,
+  onReassignStop,
 }: {
   dayPlan: DayPlan;
   canvassers: Canvasser[];
   addresses: CanvassAddress[];
+  bases: SalesBase[];
   expandedCanvasserId: string | null;
   onToggleCanvasser: (canvasserId: string, dayDate: string) => void;
   durationMins: number;
   exportedKeys: Set<string>;
   onToggleExport: (key: string) => void;
+  focusedKey: string | null;
+  focusedStepIdx: number | null;
+  onFocusStep: (key: string, idx: number | null) => void;
+  onReassignStop: (date: string, fromCanvasserId: string, stopIdx: number, toCanvasserId: string | null) => void;
 }) {
   const addrById = new Map(addresses.map((a) => [a.id, a]));
   const totalAddresses = dayPlan.routes.reduce(
@@ -698,40 +705,91 @@ function DayCard({
                 </button>
               </div>
 
-              {isExpanded && (
-                <div className="border-t border-gray-100">
-                  <ol aria-label={`Route for ${canvasser.name}`}>
-                    {route.stops.map((stop, idx) => {
-                      const stopAddresses = stop.addressIds
-                        .map((id) => addrById.get(id))
-                        .filter(Boolean) as CanvassAddress[];
-                      const doorMins = durationMins * stop.addressIds.length;
-                      return (
-                        <li key={stop.addressIds[0]} className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-b-0">
-                          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-loch text-white text-xs font-bold flex items-center justify-center mt-0.5">
-                            {idx + 1}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            {stop.travelSec > 0 && (
-                              <p className="text-xs text-green-600 mb-1">↓ ~{formatDurationSec(stop.travelSec)} travel</p>
-                            )}
-                            {stopAddresses.length > 0 ? (
-                              <div className="space-y-0.5">
-                                {stopAddresses.map((a) => (
-                                  <p key={a.id} className="text-sm font-semibold text-coal">{a.address}</p>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-sm font-semibold text-coal">{stop.addressIds[0]}</p>
-                            )}
-                            <p className="text-xs text-coal/60 mt-0.5">Approx {doorMins} min{doorMins === 1 ? "" : "s"} at door</p>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </div>
-              )}
+              {isExpanded && (() => {
+                // Resolve start/end for this canvasser
+                const startBase = canvasser.startLocation === "base" && canvasser.startBaseId
+                  ? bases.find((b) => b.id === canvasser.startBaseId) : undefined;
+                const endBase = canvasser.endLocation === "base" && canvasser.endBaseId
+                  ? bases.find((b) => b.id === canvasser.endBaseId) : undefined;
+                const startLabel = startBase ? `${startBase.name} base` : "Home";
+                const startAddress = startBase ? startBase.address : canvasser.homeAddress;
+                const endLabel = endBase ? `${endBase.name} base` : "Home";
+                const endAddress = endBase ? endBase.address : canvasser.homeAddress;
+                const rowBase = "flex items-start gap-3 px-4 py-3 border-b border-gray-50";
+                // Other canvassers on this day (for reassign)
+                const otherCanvassers = dayPlan.routes
+                  .map((r) => canvassers.find((c) => c.id === r.canvasserId))
+                  .filter((c): c is Canvasser => !!c && c.id !== canvasser.id);
+                return (
+                  <div className="border-t border-gray-100">
+                    <ol aria-label={`Route for ${canvasser.name}`}>
+                      {/* Start */}
+                      <li className={rowBase}>
+                        <span className="flex-shrink-0 w-7 h-7 rounded-full bg-map-anchor text-white text-xs font-bold flex items-center justify-center mt-0.5">S</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-loch uppercase tracking-wide">Start</p>
+                          <p className="text-sm font-semibold text-coal mt-0.5">{startLabel}</p>
+                          <p className="text-xs text-coal/50">{startAddress}</p>
+                        </div>
+                      </li>
+
+                      {route.stops.map((stop, idx) => {
+                        const stopAddresses = stop.addressIds
+                          .map((id) => addrById.get(id))
+                          .filter(Boolean) as CanvassAddress[];
+                        const doorMins = durationMins * stop.addressIds.length;
+                        const isFocused = focusedKey === key && focusedStepIdx === idx;
+                        return (
+                          <li
+                            key={stop.addressIds[0]}
+                            onClick={() => onFocusStep(key, focusedKey === key && focusedStepIdx === idx ? null : idx)}
+                            className={`${rowBase} cursor-pointer last:border-b-0 ${isFocused ? "ring-2 ring-inset ring-loch/40 bg-loch/5" : "hover:bg-gray-50/50"}`}
+                          >
+                            <span className="flex-shrink-0 w-7 h-7 rounded-full bg-loch text-white text-xs font-bold flex items-center justify-center mt-0.5">
+                              {idx + 1}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              {stop.travelSec > 0 && (
+                                <p className="text-xs text-green-600 mb-1">↓ ~{formatDurationSec(stop.travelSec)} travel</p>
+                              )}
+                              {stopAddresses.length > 0 ? (
+                                <div className="space-y-0.5">
+                                  {stopAddresses.map((a) => (
+                                    <p key={a.id} className="text-sm font-semibold text-coal">{a.address}</p>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-sm font-semibold text-coal">{stop.addressIds[0]}</p>
+                              )}
+                              <p className="text-xs text-coal/60 mt-0.5">Approx {doorMins} min{doorMins === 1 ? "" : "s"} at door</p>
+                            </div>
+                            {/* Reassign dropdown — stop click-through */}
+                            <div onClick={(e) => e.stopPropagation()} className="flex-shrink-0 self-center">
+                              <CanvassAssignDropdown
+                                date={dayPlan.date}
+                                fromCanvasserId={canvasser.id}
+                                stopIdx={idx}
+                                otherCanvassers={otherCanvassers}
+                                onReassign={onReassignStop}
+                              />
+                            </div>
+                          </li>
+                        );
+                      })}
+
+                      {/* End */}
+                      <li className={rowBase.replace("border-b border-gray-50", "")}>
+                        <span className="flex-shrink-0 w-7 h-7 rounded-full bg-map-anchor text-white text-xs font-bold flex items-center justify-center mt-0.5">E</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-loch uppercase tracking-wide">End</p>
+                          <p className="text-sm font-semibold text-coal mt-0.5">{endLabel}</p>
+                          <p className="text-xs text-coal/50">{endAddress}</p>
+                        </div>
+                      </li>
+                    </ol>
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
@@ -740,9 +798,40 @@ function DayCard({
   );
 }
 
+// ── Canvass assign/reassign dropdown ─────────────────────────────────────────
+
+function CanvassAssignDropdown({
+  date, fromCanvasserId, stopIdx, otherCanvassers, onReassign,
+}: {
+  date: string;
+  fromCanvasserId: string;
+  stopIdx: number;
+  otherCanvassers: Canvasser[];
+  onReassign: (date: string, fromId: string, stopIdx: number, toId: string | null) => void;
+}) {
+  return (
+    <select
+      className="text-[11px] text-coal/50 bg-transparent border border-gray-200 rounded px-1 py-0.5 hover:border-loch/30 focus:outline-none focus:ring-1 focus:ring-loch/30 cursor-pointer"
+      value=""
+      onChange={(e) => {
+        const val = e.target.value;
+        onReassign(date, fromCanvasserId, stopIdx, val === "unassign" ? null : val);
+        e.target.value = "";
+      }}
+      title="Reassign stop"
+    >
+      <option value="" disabled>Move…</option>
+      {otherCanvassers.map((c) => (
+        <option key={c.id} value={c.id}>{c.name}</option>
+      ))}
+      <option value="unassign">Unassign</option>
+    </select>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function CanvassPlanner({ onRoutePreview, onResultReady }: CanvassPlannerProps) {
+export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResultReady }: CanvassPlannerProps) {
   const [canvassers, setCanvassersState] = useState<Canvasser[]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -787,6 +876,8 @@ export default function CanvassPlanner({ onRoutePreview, onResultReady }: Canvas
   const [canvassResult, setCanvassResult] = useState<CanvassResult | null>(null);
   const [geocodedAddresses, setGeocodedAddresses] = useState<CanvassAddress[]>([]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
+  const [focusedStepIdx, setFocusedStepIdx] = useState<number | null>(null);
   const [exportedKeys, setExportedKeys] = useState<Set<string>>(new Set());
   const [showManager, setShowManager] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -954,16 +1045,49 @@ export default function CanvassPlanner({ onRoutePreview, onResultReady }: Canvas
     setCanvassResult(null);
     setGeocodedAddresses([]);
     setExpandedKey(null);
+    setFocusedKey(null);
+    setFocusedStepIdx(null);
     setExportedKeys(new Set());
     setPhase("idle");
     setStatusMsg("");
     onRoutePreview(null);
   }
 
+  function reassignCanvassStop(date: string, fromCanvasserId: string, stopIdx: number, toCanvasserId: string | null) {
+    if (!canvassResult) return;
+    const stop = canvassResult.days
+      .find((d) => d.date === date)?.routes
+      .find((r) => r.canvasserId === fromCanvasserId)?.stops[stopIdx];
+    if (!stop) return;
+
+    const newDays = canvassResult.days.map((day) => {
+      if (day.date !== date) return day;
+      const newRoutes = day.routes.map((route) => {
+        if (route.canvasserId === fromCanvasserId) {
+          return { ...route, stops: route.stops.filter((_, i) => i !== stopIdx) };
+        }
+        if (toCanvasserId && route.canvasserId === toCanvasserId) {
+          return { ...route, stops: [...route.stops, { ...stop, travelSec: 0 }] };
+        }
+        return route;
+      });
+      return { ...day, routes: newRoutes };
+    });
+
+    const newUnassigned = toCanvasserId === null
+      ? [...canvassResult.unassigned, ...stop.addressIds]
+      : canvassResult.unassigned;
+
+    setCanvassResult({ ...canvassResult, days: newDays, unassigned: newUnassigned });
+  }
+
   async function handleToggleCanvasser(canvasserId: string, date: string) {
     const key = `${canvasserId}:${date}`;
     const next = expandedKey === key ? null : key;
     setExpandedKey(next);
+    setFocusedKey(null);
+    setFocusedStepIdx(null);
+    onFocusSegment?.(null);
 
     if (!next || !canvassResult) { onRoutePreview(null); return; }
 
@@ -1242,6 +1366,7 @@ export default function CanvassPlanner({ onRoutePreview, onResultReady }: Canvas
               dayPlan={dayPlan}
               canvassers={canvassers}
               addresses={geocodedAddresses}
+              bases={bases}
               expandedCanvasserId={expandedKey}
               onToggleCanvasser={handleToggleCanvasser}
               durationMins={durationMins}
@@ -1251,6 +1376,14 @@ export default function CanvassPlanner({ onRoutePreview, onResultReady }: Canvas
                 if (next.has(k)) next.delete(k); else next.add(k);
                 return next;
               })}
+              focusedKey={focusedKey}
+              focusedStepIdx={focusedStepIdx}
+              onFocusStep={(k, idx) => {
+                setFocusedKey(idx === null ? null : k);
+                setFocusedStepIdx(idx);
+                onFocusSegment?.(idx);
+              }}
+              onReassignStop={reassignCanvassStop}
             />
           ))}
 
