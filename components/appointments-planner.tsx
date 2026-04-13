@@ -1462,7 +1462,6 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
 
   return (
   <CustomTagsContext.Provider value={customTags}>
-    <style>{`@media print { body > *:not(#print-portal-appointments) { display: none !important; } #print-portal-appointments { display: block !important; position: static !important; left: 0 !important; top: 0 !important; width: 100% !important; overflow: visible !important; } }`}</style>
     <div className="p-5 lg:p-6 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-4">
@@ -1864,7 +1863,22 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
                   flushSync(() => setIsPrintLoading(true));
                   await prefetchGeometryForExport();
                   await new Promise((r) => setTimeout(r, 3500));
+                  // Direct DOM print — bypass @media print CSS cascade entirely
+                  const portal = document.getElementById("print-portal-appointments");
+                  const hidden: { el: HTMLElement; prev: string }[] = [];
+                  if (portal) {
+                    portal.style.cssText = "display:block;position:fixed;left:0;top:0;width:100%;background:white;z-index:2147483647;overflow:visible";
+                    Array.from(document.body.children).forEach((child) => {
+                      if (child !== portal && child instanceof HTMLElement) {
+                        hidden.push({ el: child, prev: child.style.cssText });
+                        child.style.setProperty("display", "none", "important");
+                      }
+                    });
+                  }
                   window.print();
+                  // Restore DOM
+                  hidden.forEach(({ el, prev }) => { el.style.cssText = prev; });
+                  if (portal) portal.style.cssText = "";
                   setIsPrintLoading(false);
                 }}
                 disabled={isPrintLoading}
