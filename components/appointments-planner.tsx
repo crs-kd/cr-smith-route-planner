@@ -1867,13 +1867,16 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
                   const portal = document.getElementById("print-portal-appointments");
                   const hidden: { el: HTMLElement; prev: string }[] = [];
                   if (portal) {
-                    portal.style.cssText = "display:block;position:fixed;left:0;top:0;width:100%;background:white;z-index:2147483647;overflow:visible";
+                    // position:static so page-break-after works; keep 794px so Leaflet doesn't re-measure
+                    portal.style.cssText = "display:block;position:static;width:794px;background:white;overflow:visible";
                     Array.from(document.body.children).forEach((child) => {
                       if (child !== portal && child instanceof HTMLElement) {
                         hidden.push({ el: child, prev: child.style.cssText });
                         child.style.setProperty("display", "none", "important");
                       }
                     });
+                    // Let any pending Leaflet tile loads settle
+                    await new Promise(r => setTimeout(r, 800));
                   }
                   window.print();
                   // Restore DOM
@@ -1901,7 +1904,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
             {/* Print portal — rendered on document.body to escape the app layout */}
             {typeof document !== "undefined" && createPortal(
               <div id="print-portal-appointments" style={isPrintLoading ? { display: "block", position: "fixed", left: -9999, top: 0, width: 794, overflowY: "auto" as const } : { display: "none" }}>
-                {scheduleResult.schedules
+                {sorted
                   .filter(s => exportedRepIds.has(s.repId))
                   .map(schedule => {
                     const rep = reps.find(r => r.id === schedule.repId);
@@ -1913,7 +1916,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
                     });
                     const preview = routeGeometryCache.get(schedule.repId);
                     return (
-                      <div key={schedule.repId} style={{ pageBreakAfter: "always", padding: "2rem", fontFamily: "sans-serif" }}>
+                      <div key={schedule.repId} style={{ pageBreakAfter: "always", breakAfter: "page" as const, padding: "2rem", fontFamily: "sans-serif" }}>
                         <h1 style={{ fontSize: "1.5rem", fontWeight: "bold", marginBottom: "0.25rem" }}>{rep.name}</h1>
                         <p style={{ fontSize: "0.875rem", color: "#6b7280", marginBottom: "1rem" }}>
                           {new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}

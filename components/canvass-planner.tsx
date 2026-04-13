@@ -1508,13 +1508,16 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
                 const portal = document.getElementById("print-portal-canvass");
                 const hidden: { el: HTMLElement; prev: string }[] = [];
                 if (portal) {
-                  portal.style.cssText = "display:block;position:fixed;left:0;top:0;width:100%;background:white;z-index:2147483647;overflow:visible";
+                  // position:static so page-break-after works; keep 794px so Leaflet doesn't re-measure
+                  portal.style.cssText = "display:block;position:static;width:794px;background:white;overflow:visible";
                   Array.from(document.body.children).forEach((child) => {
                     if (child !== portal && child instanceof HTMLElement) {
                       hidden.push({ el: child, prev: child.style.cssText });
                       child.style.setProperty("display", "none", "important");
                     }
                   });
+                  // Let any pending Leaflet tile loads settle
+                  await new Promise(r => setTimeout(r, 800));
                 }
                 window.print();
                 // Restore DOM
@@ -1639,7 +1642,7 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
                     const routeKey = `${route.canvasserId}:${dayPlan.date}`;
                     const preview = routeGeometryCache.get(routeKey);
                     return (
-                      <div key={routeKey} style={{ pageBreakAfter: "always", padding: "2rem", fontFamily: "sans-serif" }}>
+                      <div key={routeKey} style={{ pageBreakAfter: "always", breakAfter: "page" as const, padding: "2rem", fontFamily: "sans-serif" }}>
                         <h1 style={{ fontSize: "1.5rem", fontWeight: "bold", marginBottom: "0.25rem" }}>{canvasser.name}</h1>
                         <p style={{ fontSize: "0.875rem", color: "#6b7280", marginBottom: "1rem" }}>{dateLabel}</p>
                         {/* Route map */}
