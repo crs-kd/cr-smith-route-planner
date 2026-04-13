@@ -1046,7 +1046,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
       body: JSON.stringify(next),
     }).catch(console.error);
   }
-  const [customTags, setCustomTagsState] = useLocalStorage<CustomTag[]>("cr-smith-tags", defaultCustomTags);
+  const [customTags, setCustomTagsState] = useLocalStorage<CustomTag[]>("cr-smith-custom-tags", defaultCustomTags);
 
   function setCustomTags(tags: CustomTag[]) {
     setCustomTagsState(tags);
