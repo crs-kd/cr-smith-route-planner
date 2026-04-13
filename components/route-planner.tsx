@@ -149,7 +149,7 @@ export default function RoutePlanner() {
         </button>
 
         {/* ── Mode tabs ── */}
-        {visibleModes.length > 1 && (
+        {visibleModes.length > 0 && (
           <div
             className={`flex-shrink-0 flex border-b border-gray-100 bg-white px-5 lg:px-6 ${!sidebarOpen ? "lg:invisible lg:pointer-events-none" : ""}`}
             role="tablist"
