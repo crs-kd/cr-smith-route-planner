@@ -49,7 +49,7 @@ interface RoutePreviewData {
 interface CanvassPlannerProps {
   onRoutePreview: (data: RoutePreviewData | null) => void;
   onFocusSegment?: (idx: number | null) => void;
-  onResultReady?: (inputs: Record<string, unknown>, result: Record<string, unknown>) => void;
+  onResultReady?: (inputs: Record<string, unknown>, result: Record<string, unknown>, openModal?: boolean) => void;
 }
 
 type Phase = "idle" | "geocoding" | "matrix" | "scheduling" | "done" | "error";
@@ -893,6 +893,7 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const [focusedStepIdx, setFocusedStepIdx] = useState<number | null>(null);
   const [exportedKeys, setExportedKeys] = useState<Set<string>>(new Set());
+  const [pendingAssign, setPendingAssign] = useState<Record<string, { date: string; canvasserId: string }>>({});
   const [routeGeometryCache, setRouteGeometryCache] = useState<Map<string, RoutePreviewData | null>>(new Map());
   const [isPrintLoading, setIsPrintLoading] = useState(false);
   const [showManager, setShowManager] = useState(false);
@@ -1058,11 +1059,6 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
         endLabel: endBase ? `${endBase.name} base` : "Home",
       };
     });
-    onResultReady?.(
-      { type: "canvass", addresses: rawAddresses, startDate, durationMins, activeCanvasserIds: workingCanvassers.map(c => c.id), canvassers: canvasserSnapshot } as Record<string, unknown>,
-      { days: result.days, unassigned: result.unassigned, geocodedAddresses: geocoded } as unknown as Record<string, unknown>
-    );
-
     const totalAssigned = geocoded.length - result.unassigned.length;
     void grouped; // used implicitly via stops.length in status message
     const failNote = failedCount > 0 ? ` · ${failedCount} address${failedCount === 1 ? "" : "es"} couldn't be geocoded` : "";
@@ -1113,6 +1109,97 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
       : canvassResult.unassigned;
 
     setCanvassResult({ ...canvassResult, days: newDays, unassigned: newUnassigned });
+  }
+
+  function assignUnassigned(addressId: string, date: string, toCanvasserId: string) {
+    if (!canvassResult) return;
+    const newStop = { addressIds: [addressId], travelSec: 0 };
+    const newDays = canvassResult.days.map((day) => {
+      if (day.date !== date) return day;
+      return {
+        ...day,
+        routes: day.routes.map((route) =>
+          route.canvasserId === toCanvasserId
+            ? { ...route, stops: [...route.stops, newStop] }
+            : route
+        ),
+      };
+    });
+    setCanvassResult({
+      ...canvassResult,
+      days: newDays,
+      unassigned: canvassResult.unassigned.filter((id) => id !== addressId),
+    });
+  }
+
+  async function prefetchGeometryForExport(): Promise<void> {
+    if (!canvassResult) return;
+    const updates = new Map<string, RoutePreviewData | null>();
+    const addrById = new Map(geocodedAddresses.map((a) => [a.id, a]));
+
+    for (const dayPlan of canvassResult.days) {
+      for (const route of dayPlan.routes) {
+        const key = `${route.canvasserId}:${dayPlan.date}`;
+        if (!exportedKeys.has(key) || routeGeometryCache.has(key)) continue;
+
+        const canvasser = canvassers.find((c) => c.id === route.canvasserId);
+        if (!canvasser?.homeLat || !canvasser?.homeLng || route.stops.length === 0) {
+          updates.set(key, null);
+          continue;
+        }
+
+        const startBase = canvasser.startLocation === "base" && canvasser.startBaseId
+          ? bases.find((b) => b.id === canvasser.startBaseId) : undefined;
+        const endBase = canvasser.endLocation === "base" && canvasser.endBaseId
+          ? bases.find((b) => b.id === canvasser.endBaseId) : undefined;
+
+        const startLat = startBase?.lat ?? canvasser.homeLat;
+        const startLng = startBase?.lng ?? canvasser.homeLng;
+        const startAddress = startBase ? startBase.address : canvasser.homeAddress;
+        const endLat = endBase?.lat ?? canvasser.homeLat;
+        const endLng = endBase?.lng ?? canvasser.homeLng;
+
+        const stopGroups = route.stops.map((stop) => {
+          const firstAddr = stop.addressIds.map((id) => addrById.get(id))
+            .find((a): a is CanvassAddress => !!a && a.lat != null && a.lng != null);
+          if (!firstAddr) return null;
+          const allAddrs = stop.addressIds.map((id) => addrById.get(id)).filter(Boolean) as CanvassAddress[];
+          return { lat: firstAddr.lat!, lng: firstAddr.lng!, addresses: allAddrs.map((a) => ({ address: a.address })) };
+        }).filter((s): s is NonNullable<typeof s> => s !== null);
+
+        if (stopGroups.length === 0) { updates.set(key, null); continue; }
+
+        const waypoints = [
+          { lat: startLat!, lng: startLng! },
+          ...stopGroups,
+          { lat: endLat!, lng: endLng! },
+        ];
+        const coords = waypoints.map((w) => `${w.lng},${w.lat}`).join(";");
+        let geometry: [number, number][] | null = null;
+        try {
+          const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
+          const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
+          if (data.routes?.[0]?.geometry?.coordinates) {
+            geometry = data.routes[0].geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number]);
+          }
+        } catch { /* straight lines */ }
+
+        updates.set(key, {
+          anchor: { address: startAddress, lat: startLat!, lng: startLng! },
+          stops: stopGroups.map((s, i) => ({ id: i + 1, lat: s.lat, lng: s.lng, addresses: s.addresses })),
+          geometry,
+        });
+      }
+    }
+
+    if (updates.size > 0) {
+      setRouteGeometryCache((prev) => {
+        const next = new Map(prev);
+        updates.forEach((v, k) => next.set(k, v));
+        return next;
+      });
+      await new Promise((r) => setTimeout(r, 150));
+    }
   }
 
   async function handleToggleCanvasser(canvasserId: string, date: string) {
@@ -1379,7 +1466,8 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
                   });
                   onResultReady(
                     { type: "canvass", addresses: geocodedAddresses.map(a => a.address), startDate, durationMins, activeCanvasserIds: workingCanvassers.map(c => c.id), canvassers: snap } as Record<string, unknown>,
-                    { days: canvassResult!.days, unassigned: canvassResult!.unassigned, geocodedAddresses } as unknown as Record<string, unknown>
+                    { days: canvassResult!.days, unassigned: canvassResult!.unassigned, geocodedAddresses } as unknown as Record<string, unknown>,
+                    true
                   );
                 }}
                 className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-loch border border-loch/20 rounded-md hover:bg-loch/5 transition-colors"
@@ -1414,7 +1502,8 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
             <button
               onClick={async () => {
                 setIsPrintLoading(true);
-                await new Promise(r => setTimeout(r, 2500));
+                await prefetchGeometryForExport();
+                await new Promise((r) => setTimeout(r, 3500));
                 window.print();
                 setIsPrintLoading(false);
               }}
@@ -1456,26 +1545,74 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
           ))}
 
           {/* Unassigned */}
-          {unassignedAddrs.length > 0 && (
+          {canvassResult && canvassResult.unassigned.length > 0 && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3.5">
-              <p className="text-sm font-semibold text-amber-800 mb-2">
-                {unassignedAddrs.length} unassigned address{unassignedAddrs.length === 1 ? "" : "es"}
+              <p className="text-sm font-semibold text-amber-800 mb-3">
+                {canvassResult.unassigned.length} unassigned address{canvassResult.unassigned.length === 1 ? "" : "es"}
               </p>
-              <ul className="space-y-1">
-                {unassignedAddrs.map((addr, i) => (
-                  <li key={i} className="text-xs text-amber-700 truncate">{addr}</li>
-                ))}
-              </ul>
-              <p className="text-xs text-amber-600 mt-2">
-                These addresses couldn&apos;t be fit within {14} days. Try adding more canvassers or extending working hours.
-              </p>
+              <div className="space-y-2">
+                {canvassResult.unassigned.map((addressId) => {
+                  const addr = geocodedAddresses.find((a) => a.id === addressId)?.address ?? addressId;
+                  const firstDay = canvassResult.days[0];
+                  const sel = pendingAssign[addressId] ?? {
+                    date: firstDay?.date ?? "",
+                    canvasserId: firstDay?.routes[0]?.canvasserId ?? "",
+                  };
+                  const canvassersOnDay = (canvassResult.days.find((d) => d.date === sel.date)?.routes ?? [])
+                    .map((r) => canvassers.find((c) => c.id === r.canvasserId))
+                    .filter((c): c is Canvasser => !!c);
+                  return (
+                    <div key={addressId} className="bg-white rounded border border-amber-200 p-2.5">
+                      <p className="text-xs font-semibold text-coal mb-2 truncate">{addr}</p>
+                      <div className="flex gap-2 items-center flex-wrap">
+                        {canvassResult.days.length > 1 && (
+                          <select
+                            value={sel.date}
+                            onChange={(e) => {
+                              const newDate = e.target.value;
+                              const firstCanvasser = canvassResult.days.find((d) => d.date === newDate)?.routes[0]?.canvasserId ?? "";
+                              setPendingAssign((prev) => ({ ...prev, [addressId]: { date: newDate, canvasserId: firstCanvasser } }));
+                            }}
+                            className="text-xs bg-white border border-gray-200 rounded px-1.5 py-1 outline-none"
+                          >
+                            {canvassResult.days.map((d) => {
+                              const label = new Date(d.date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+                              return <option key={d.date} value={d.date}>{label}</option>;
+                            })}
+                          </select>
+                        )}
+                        <select
+                          value={sel.canvasserId}
+                          onChange={(e) => setPendingAssign((prev) => ({ ...prev, [addressId]: { ...sel, canvasserId: e.target.value } }))}
+                          className="text-xs bg-white border border-gray-200 rounded px-1.5 py-1 outline-none"
+                        >
+                          {canvassersOnDay.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => {
+                            if (!sel.date || !sel.canvasserId) return;
+                            assignUnassigned(addressId, sel.date, sel.canvasserId);
+                            setPendingAssign((prev) => { const n = { ...prev }; delete n[addressId]; return n; });
+                          }}
+                          disabled={!sel.canvasserId}
+                          className="text-xs font-medium px-2.5 py-1 bg-amber-700 text-white rounded hover:bg-amber-800 transition-colors disabled:opacity-50"
+                        >
+                          Assign
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
           {/* Print portal */}
           {typeof document !== "undefined" && createPortal(
-            <div id="print-portal" style={isPrintLoading ? { display: "block", position: "fixed", left: -9999, top: 0, width: 794, overflowY: "auto" } : { display: "none" }}>
-              <style>{`@media print { body > *:not(#print-portal) { display: none !important; } #print-portal { display: block !important; position: static !important; left: 0 !important; width: 100% !important; } }`}</style>
+            <div id="print-portal-canvass" style={isPrintLoading ? { position: "fixed", left: 0, top: 0, width: 794, opacity: 0, pointerEvents: "none" as const, zIndex: -1, overflowY: "auto" as const } : { display: "none" }}>
+              <style>{`@media print { body > *:not(#print-portal-canvass) { display: none !important; } #print-portal-canvass { display: block !important; position: static !important; left: 0 !important; width: 100% !important; opacity: 1 !important; } }`}</style>
               {canvassResult.days.flatMap((dayPlan) => {
                 const dateObj = new Date(dayPlan.date + "T12:00:00");
                 const dateLabel = dateObj.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });

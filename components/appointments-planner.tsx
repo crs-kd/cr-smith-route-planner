@@ -62,7 +62,7 @@ interface RoutePreviewData {
 interface AppointmentsPlannerProps {
   onRoutePreview: (data: RoutePreviewData | null) => void;
   onFocusSegment?: (idx: number | null) => void;
-  onResultReady?: (inputs: Record<string, unknown>, result: Record<string, unknown>) => void;
+  onResultReady?: (inputs: Record<string, unknown>, result: Record<string, unknown>, openModal?: boolean) => void;
 }
 
 type Phase = "idle" | "geocoding" | "matrix" | "scheduling" | "done" | "error";
@@ -1232,11 +1232,6 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
       homeLat: r.homeLat ?? null, homeLng: r.homeLng ?? null,
       startTime: r.startTime, endTime: r.endTime,
     }));
-    onResultReady?.(
-      { type: "appointments", appointments: appts, durationHours, activeRepIds: repSnapshot.map(r => r.id), reps: repSnapshot } as Record<string, unknown>,
-      { schedules: result.schedules, geocodedAppts: geocodedOk } as unknown as Record<string, unknown>
-    );
-
     const totalAssigned = result.schedules.reduce((n, s) => n + s.assignments.length, 0);
     const failNote = failedSet.size > 0 ? ` · ${failedSet.size} address${failedSet.size === 1 ? "" : "es"} couldn't be geocoded` : "";
     setPhase("done");
@@ -1345,6 +1340,58 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
     onRoutePreview(previewData);
   }
 
+  async function prefetchGeometryForExport(): Promise<void> {
+    if (!scheduleResult) return;
+    const updates = new Map<string, RoutePreviewData | null>();
+
+    for (const schedule of scheduleResult.schedules) {
+      if (!exportedRepIds.has(schedule.repId) || routeGeometryCache.has(schedule.repId)) continue;
+
+      const rep = reps.find((r) => r.id === schedule.repId);
+      if (!rep?.homeLat || !rep?.homeLng) { updates.set(schedule.repId, null); continue; }
+
+      const startLoc = getRepStartLoc(rep);
+      const endLoc = getRepEndLoc(rep);
+
+      const orderedAppts = [...schedule.assignments]
+        .sort((a, b) => {
+          const ta = geocodedAppts.find((ap) => ap.id === a.apptId);
+          const tb = geocodedAppts.find((ap) => ap.id === b.apptId);
+          return (ta ? parseHHMM(ta.timeHHMM) : 0) - (tb ? parseHHMM(tb.timeHHMM) : 0);
+        })
+        .map((a) => geocodedAppts.find((ap) => ap.id === a.apptId))
+        .filter((a): a is ApptInput => !!a && a.lat != null && a.lng != null);
+
+      if (orderedAppts.length === 0) { updates.set(schedule.repId, null); continue; }
+
+      const waypoints = [startLoc, ...orderedAppts.map((a) => ({ lat: a.lat!, lng: a.lng! })), endLoc];
+      const coords = waypoints.map((w) => `${w.lng},${w.lat}`).join(";");
+      let geometry: [number, number][] | null = null;
+      try {
+        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
+        const data = await res.json() as { routes?: Array<{ geometry: { coordinates: [number, number][] } }> };
+        if (data.routes?.[0]?.geometry?.coordinates) {
+          geometry = data.routes[0].geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number]);
+        }
+      } catch { /* straight lines */ }
+
+      updates.set(schedule.repId, {
+        anchor: { address: startLoc.address, lat: startLoc.lat, lng: startLoc.lng },
+        stops: orderedAppts.map((a, i) => ({ id: i, lat: a.lat!, lng: a.lng!, addresses: [{ address: a.urn ? `${a.urn} — ${a.address}` : a.address }] })),
+        geometry,
+      });
+    }
+
+    if (updates.size > 0) {
+      setRouteGeometryCache((prev) => {
+        const next = new Map(prev);
+        updates.forEach((v, k) => next.set(k, v));
+        return next;
+      });
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+
   async function handleToggleRep(repId: string) {
     const next = expandedRepId === repId ? null : repId;
     setExpandedRepId(next);
@@ -1415,7 +1462,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
 
   return (
   <CustomTagsContext.Provider value={customTags}>
-    <style>{`@media print { body > *:not(#print-portal) { display: none !important; } #print-portal { display: block !important; } }`}</style>
+    <style>{`@media print { body > *:not(#print-portal-appointments) { display: none !important; } #print-portal-appointments { display: block !important; } }`}</style>
     <div className="p-5 lg:p-6 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-4">
@@ -1772,7 +1819,8 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
                     }));
                     onResultReady(
                       { type: "appointments", appointments: appts, durationHours, activeRepIds: snap.map(r => r.id), reps: snap } as Record<string, unknown>,
-                      { schedules: scheduleResult.schedules, geocodedAppts } as unknown as Record<string, unknown>
+                      { schedules: scheduleResult.schedules, geocodedAppts } as unknown as Record<string, unknown>,
+                      true
                     );
                   }}
                   className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-loch border border-loch/20 rounded-md hover:bg-loch/5 transition-colors"
@@ -1814,7 +1862,8 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
               <button
                 onClick={async () => {
                   setIsPrintLoading(true);
-                  await new Promise(r => setTimeout(r, 2500));
+                  await prefetchGeometryForExport();
+                  await new Promise((r) => setTimeout(r, 3500));
                   window.print();
                   setIsPrintLoading(false);
                 }}
@@ -1837,7 +1886,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
 
             {/* Print portal — rendered on document.body to escape the app layout */}
             {typeof document !== "undefined" && createPortal(
-              <div id="print-portal" style={isPrintLoading ? { display: "block", position: "fixed", left: -9999, top: 0, width: 794, overflowY: "auto" } : { display: "none" }}>
+              <div id="print-portal-appointments" style={isPrintLoading ? { position: "fixed", left: 0, top: 0, width: 794, opacity: 0, pointerEvents: "none" as const, zIndex: -1, overflowY: "auto" as const } : { display: "none" }}>
                 {scheduleResult.schedules
                   .filter(s => exportedRepIds.has(s.repId))
                   .map(schedule => {

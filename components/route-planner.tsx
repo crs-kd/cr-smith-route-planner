@@ -179,9 +179,9 @@ export default function RoutePlanner() {
               <AppointmentsPlanner
                 onRoutePreview={(data) => { setRoutePreview(data); if (!data) setFocusedSegmentIdx(null); }}
                 onFocusSegment={setFocusedSegmentIdx}
-                onResultReady={canSave ? (inputs, result) => {
+                onResultReady={canSave ? (inputs, result, openModal) => {
                   setPendingSave({ type: "appointments", inputs, result });
-                  setShowSaveModal(true);
+                  if (openModal) setShowSaveModal(true);
                 } : undefined}
               />
             </div>
@@ -191,9 +191,9 @@ export default function RoutePlanner() {
               <CanvassPlanner
                 onRoutePreview={(data) => { setRoutePreview(data); if (!data) setFocusedSegmentIdx(null); }}
                 onFocusSegment={setFocusedSegmentIdx}
-                onResultReady={canSave ? (inputs, result) => {
+                onResultReady={canSave ? (inputs, result, openModal) => {
                   setPendingSave({ type: "canvass", inputs, result });
-                  setShowSaveModal(true);
+                  if (openModal) setShowSaveModal(true);
                 } : undefined}
               />
             </div>
