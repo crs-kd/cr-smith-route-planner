@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 
 const PrintMapView = dynamic(() => import("./map-view"), {
   ssr: false,
@@ -1462,7 +1462,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
 
   return (
   <CustomTagsContext.Provider value={customTags}>
-    <style>{`@media print { body > *:not(#print-portal-appointments) { display: none !important; } #print-portal-appointments { display: block !important; } }`}</style>
+    <style>{`@media print { body > *:not(#print-portal-appointments) { display: none !important; } #print-portal-appointments { display: block !important; position: static !important; left: 0 !important; top: 0 !important; width: 100% !important; overflow: visible !important; } }`}</style>
     <div className="p-5 lg:p-6 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-4">
@@ -1861,7 +1861,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
               {/* Export */}
               <button
                 onClick={async () => {
-                  setIsPrintLoading(true);
+                  flushSync(() => setIsPrintLoading(true));
                   await prefetchGeometryForExport();
                   await new Promise((r) => setTimeout(r, 3500));
                   window.print();
@@ -1886,7 +1886,7 @@ export default function AppointmentsPlanner({ onRoutePreview, onFocusSegment, on
 
             {/* Print portal — rendered on document.body to escape the app layout */}
             {typeof document !== "undefined" && createPortal(
-              <div id="print-portal-appointments" style={isPrintLoading ? { position: "fixed", left: 0, top: 0, width: 794, opacity: 0, pointerEvents: "none" as const, zIndex: -1, overflowY: "auto" as const } : { display: "none" }}>
+              <div id="print-portal-appointments" style={isPrintLoading ? { display: "block", position: "fixed", left: -9999, top: 0, width: 794, overflowY: "auto" as const } : { display: "none" }}>
                 {scheduleResult.schedules
                   .filter(s => exportedRepIds.has(s.repId))
                   .map(schedule => {

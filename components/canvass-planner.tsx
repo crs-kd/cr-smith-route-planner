@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 
 const PrintMapView = dynamic(() => import("./map-view"), {
   ssr: false,
@@ -1298,6 +1298,7 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
 
   return (
     <div className="p-5 lg:p-6 space-y-5">
+      <style>{`@media print { body > *:not(#print-portal-canvass) { display: none !important; } #print-portal-canvass { display: block !important; position: static !important; left: 0 !important; top: 0 !important; width: 100% !important; overflow: visible !important; } }`}</style>
       {/* Toolbar — mirrors appointments: settings left, manage button right */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2 flex-wrap">
@@ -1501,7 +1502,7 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
             {/* Export button */}
             <button
               onClick={async () => {
-                setIsPrintLoading(true);
+                flushSync(() => setIsPrintLoading(true));
                 await prefetchGeometryForExport();
                 await new Promise((r) => setTimeout(r, 3500));
                 window.print();
@@ -1611,8 +1612,7 @@ export default function CanvassPlanner({ onRoutePreview, onFocusSegment, onResul
 
           {/* Print portal */}
           {typeof document !== "undefined" && createPortal(
-            <div id="print-portal-canvass" style={isPrintLoading ? { position: "fixed", left: 0, top: 0, width: 794, opacity: 0, pointerEvents: "none" as const, zIndex: -1, overflowY: "auto" as const } : { display: "none" }}>
-              <style>{`@media print { body > *:not(#print-portal-canvass) { display: none !important; } #print-portal-canvass { display: block !important; position: static !important; left: 0 !important; width: 100% !important; opacity: 1 !important; } }`}</style>
+            <div id="print-portal-canvass" style={isPrintLoading ? { display: "block", position: "fixed", left: -9999, top: 0, width: 794, overflowY: "auto" as const } : { display: "none" }}>
               {canvassResult.days.flatMap((dayPlan) => {
                 const dateObj = new Date(dayPlan.date + "T12:00:00");
                 const dateLabel = dateObj.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
