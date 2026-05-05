@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "the-difference",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "/Users/kyledrysdale/Documents/GitHub/the-difference", "-p", "3334"],
+      "port": 3334
+    }
+  ]
+}
